@@ -6,7 +6,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from collector.core import Collector, discover, open_database
+from collector.core import Collector, discover, open_database, resolve_host_id
 
 
 class CollectorTest(unittest.TestCase):
@@ -78,6 +78,16 @@ class CollectorTest(unittest.TestCase):
         portable = self.base / "Portable MT5"
         (portable / "Logs").mkdir(parents=True)
         self.assertEqual(discover([], [portable]), [portable.resolve()])
+
+    def test_existing_host_id_is_reused_and_mixed_ids_are_rejected(self) -> None:
+        self.assertEqual(resolve_host_id(self.connection, None, "actual-hostname"), "actual-hostname")
+        Collector(self.connection, "first-id", [self.root]).run_once()
+        self.assertEqual(resolve_host_id(self.connection, None, "actual-hostname"), "first-id")
+        with self.assertRaises(ValueError):
+            resolve_host_id(self.connection, "other-id", "actual-hostname")
+        Collector(self.connection, "other-id", [self.root]).run_once()
+        with self.assertRaises(ValueError):
+            resolve_host_id(self.connection, None, "actual-hostname")
 
 
 if __name__ == "__main__":

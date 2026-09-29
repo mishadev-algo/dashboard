@@ -70,11 +70,32 @@ def open_database(path: Path) -> sqlite3.Connection:
             byte_offset INTEGER NOT NULL,
             raw_line TEXT NOT NULL,
             received_utc TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            delivered_utc TEXT,
             PRIMARY KEY (terminal_id, stream, file_name, generation, byte_offset)
         );
     """)
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(log_events)")}
+    if "delivered_utc" not in columns:
+        connection.execute("ALTER TABLE log_events ADD COLUMN delivered_utc TEXT")
     connection.commit()
     return connection
+
+
+def resolve_host_id(connection: sqlite3.Connection, requested: str | None, hostname: str) -> str:
+    known = {
+        row[0] for row in connection.execute(
+            "SELECT host_id FROM terminals UNION SELECT host_id FROM log_events"
+        )
+    }
+    if len(known) > 1:
+        raise ValueError(
+            "collector database contains multiple host IDs; keep it as an archive and "
+            "use a new --db for the central ingest trial"
+        )
+    existing = next(iter(known), None)
+    if requested and existing and requested != existing:
+        raise ValueError(f"database host ID is {existing!r}; use that ID or a new --db")
+    return requested or existing or hostname
 
 
 def encoding_and_bom(path: Path) -> tuple[str, int, bytes]:
@@ -122,6 +143,7 @@ class RunResult:
     events: int
     missing: tuple[str, ...]
     unknown: tuple[str, ...]
+    paths: tuple[Path, ...] = ()
 
 
 class Collector:
@@ -165,6 +187,7 @@ class Collector:
             events=events,
             missing=tuple(sorted(self.expected - discovered)),
             unknown=tuple(sorted(discovered - self.expected)) if self.expected else (),
+            paths=tuple(paths),
         )
 
     def _should_read(self, tid: str, stream: str, path: Path) -> bool:

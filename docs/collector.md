@@ -1,6 +1,6 @@
 # Collector prototype
 
-This first slice discovers MT5 data folders and stores complete Journal and Experts log lines in a local SQLite database. It is for validating discovery and file tailing before adding the remote ingest API, dashboard, and alerts. It does not read trade data or connect to MT5.
+The collector discovers MT5 data folders and stores complete Journal and Experts log lines in a local SQLite database. With `--server-url`, it also uploads the stored lines to the central ingest API and retries unsent lines after an outage. It does not read trade data or connect to MT5. See [central ingest setup](ingest.md).
 
 On the Windows VPS, install Python from PowerShell or Command Prompt if needed:
 
@@ -42,6 +42,8 @@ The fixture creates two terminals and proves that four labeled streams enter SQL
 The collector currently scans new files from the last two days by default and continues tracking files it has already seen. Use `--lookback-days` to widen initial history. Logs can be buffered by MT5 before they reach disk, so file collection can lag the terminal UI.
 
 The console's `events` number counts newly stored complete lines in that scan. A large first count followed by zero is normal when there are no new lines on disk. `discovered` counts folders found under configured roots. Empty `missing` and `unknown` values do not prove full coverage unless `--expected` was supplied.
+
+With remote delivery enabled, `uploaded` counts acknowledged lines in the scan and `pending` counts lines still waiting in the local SQLite database. Existing `collector.db` files with one host ID are upgraded automatically with a delivery column; previously captured lines are queued for the first upload. The collector reuses that existing host ID unless `--host-id` is given. It refuses a database containing multiple host IDs, since those would appear as separate hosts centrally. Keep such a database as an archive and use a new `--db` for the central trial. The collector advances its file cursor only after lines are committed locally, so it can keep reading during a network outage. It marks lines delivered only after the API acknowledges their event IDs. A `QUEUE_WARNING` appears at 100,000 pending lines by default; the queue is not yet capped.
 
 To inspect counts by terminal and stream in a second PowerShell window, from the same directory as `collector.db` run:
 

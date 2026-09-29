@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 *.db
 .venv/
+*.sqlite
+*.sqlite3
+*.zip
