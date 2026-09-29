@@ -118,12 +118,24 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
     missing_count = 0
     for host_id, tid, path, journal_time, experts_time, errors in terminal_rows:
         host = hosts.get(host_id)
+        process_html = '<span class="badge neutral">Unknown</span>'
         if not host or not host["online"]:
             folder_status = '<span class="badge neutral">Unknown: collector offline</span>'
         else:
-            discovered_ids = {item.get("terminal_id") for item in host["payload"].get("terminals", []) if isinstance(item, dict)}
-            if tid in discovered_ids:
+            current = next(
+                (item for item in host["payload"].get("terminals", [])
+                 if isinstance(item, dict) and item.get("terminal_id") == tid), None
+            )
+            if current:
                 folder_status = '<span class="badge good">Folder found</span>'
+                process = current.get("process", {})
+                state = process.get("state") if isinstance(process, dict) else None
+                if state == "running":
+                    process_html = '<span class="badge good">Running</span>'
+                elif state == "stopped":
+                    process_html = '<span class="badge bad">Stopped</span>'
+                elif isinstance(process, dict) and process.get("reason"):
+                    process_html += f'<small>{_escape(process["reason"])}</small>'
             else:
                 folder_status = '<span class="badge bad">Folder missing</span>'
                 missing_count += 1
@@ -131,21 +143,21 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
         rows.append(
             "<tr>"
             f'<td><a href="{_escape(log_link)}">{_escape(path.rsplit(chr(92), 1)[-1])}</a><small>{_escape(path)}</small></td>'
-            f'<td>{_escape(host_id)}</td><td>{folder_status}<small>Process: not checked</small></td>'
+            f'<td>{_escape(host_id)}</td><td>{folder_status}</td><td>{process_html}</td>'
             f'<td>{_escape(_display_time(journal_time))}</td><td>{_escape(_display_time(experts_time))}</td>'
             f'<td>{errors or 0}</td></tr>'
         )
     body = (
         '<h1>Collector and terminal folders</h1>'
         '<p class="muted">Receive times are UTC. Quiet logs do not imply that MT5 is stopped.</p>'
-        '<div class="note">Process, broker connection, and AutoTrading states need a separate terminal probe. '
-        'The table currently reports folder discovery and log receipt.</div>'
+        '<div class="note">Process state uses a read-only Windows process check matched to each installation path. '
+        'Unknown means the match could not be established. Broker connection and AutoTrading are not checked yet.</div>'
         f'<div class="cards">{cards}</div>'
         '<h2>Collectors</h2>' + ('<div class="host-list">' + "".join(host_html) + '</div>' if host_html else '<p>No heartbeats yet.</p>')
         + f'<h2>Terminals <small class="muted">({len(rows)} known; {missing_count} folders missing from online hosts)</small></h2>'
-        + '<div class="table-wrap"><table><thead><tr><th>Data folder</th><th>Host</th><th>Folder state</th>'
+        + '<div class="table-wrap"><table><thead><tr><th>Data folder</th><th>Host</th><th>Folder state</th><th>MT5 process</th>'
         '<th>Last Journal</th><th>Last Experts</th><th>Error text, 24h</th></tr></thead><tbody>'
-        + ("".join(rows) if rows else '<tr><td colspan="6">No terminals received yet.</td></tr>')
+        + ("".join(rows) if rows else '<tr><td colspan="7">No terminals received yet.</td></tr>')
         + '</tbody></table></div>'
     )
     return _page("Status", body)

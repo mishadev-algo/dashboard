@@ -2,7 +2,7 @@
 
 The central API accepts batched MT5 log events and collector heartbeats at `POST /v1/ingest`. It stores them in a separate SQLite database. Each event has a deterministic ID from host ID, terminal ID, stream, file name, generation, and byte offset. The API acknowledges every accepted ID, including a retry of an already stored event. The collector marks only acknowledged local rows as delivered. A lost response therefore causes a safe retry.
 
-The server also has a read-only status page at `/` and a raw log view at `/logs`. The status page shows collector heartbeat freshness, discovered folders, last received Journal/Experts times, and recent lines containing `error` or `failed`. It does not determine whether an MT5 process is running or connected to its broker. Central PostgreSQL storage, queue limits, the process probe, and alerts remain for later work.
+The server also has a read-only status page at `/` and a raw log view at `/logs`. The status page shows collector heartbeat freshness, discovered folders, MT5 process state when the Windows probe can match an installation, last received Journal/Experts times, and recent lines containing `error` or `failed`. The process check uses each data folder's `origin.txt` installation path (or a portable executable in the data folder) and the Windows process list. If the installation path or a process path cannot be read, it reports `unknown` rather than claiming the terminal is stopped. Broker connection and AutoTrading still need a separate MT5 status probe. Central PostgreSQL storage, queue limits, and alerts remain for later work.
 
 ## Local smoke test on one machine
 
@@ -51,4 +51,5 @@ For an outage test, stop the server with Ctrl+C, wait for a new complete MT5 log
 
 Run one central server and register each collector's exact host ID with a distinct token in `DASHBOARD_HOST_TOKENS`. The built-in server binds only to loopback and does not provide TLS. For a VPS collector to reach a server on another machine, put the API behind an HTTPS reverse proxy and pass its origin as `--server-url https://your-host`. Protect the status and log pages with authentication at that proxy before exposing them remotely. The collector rejects plain HTTP to non-local hosts. Keep tokens in environment variables or a secret store; do not put them in source files or command-line arguments.
 
-The heartbeat stores the discovered terminal paths, latest file cursor for each stream, missing and unknown folder lists, and local pending count. It reports folder discovery, not MT5 process health.
+The heartbeat stores the discovered terminal paths, latest file cursor for each stream, missing and unknown folder lists, and local pending count. The coverage fields describe folders; process state is reported separately.
+On Windows, the collector also checks running MT5 executable paths about every 30 seconds and sends a separate `running`, `stopped`, or `unknown` process state. A stale collector heartbeat makes that process state unknown on the page.

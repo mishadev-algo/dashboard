@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from .core import Collector, open_database, resolve_host_id
+from .process import ProcessProbe
 from .remote import RemoteUploadError, RemoteUploader, heartbeat, pending_count
 
 
@@ -41,6 +42,7 @@ def main() -> None:
         parser.error(str(exc))
     collector = Collector(connection, host_id, roots, args.terminal, args.expected, args.lookback_days)
     uploader = None
+    process_probe = None
     if args.server_url:
         try:
             uploader = RemoteUploader(
@@ -49,6 +51,7 @@ def main() -> None:
             )
         except ValueError as exc:
             parser.error(str(exc))
+        process_probe = ProcessProbe()
     failed = False
     try:
         while True:
@@ -57,7 +60,8 @@ def main() -> None:
             upload_error = None
             if uploader:
                 try:
-                    uploaded = uploader.upload(heartbeat(connection, host_id, result))
+                    process_states = process_probe.check(result.paths) if process_probe else {}
+                    uploaded = uploader.upload(heartbeat(connection, host_id, result, process_states))
                 except RemoteUploadError as exc:
                     upload_error = str(exc)
                     failed = True

@@ -22,8 +22,12 @@ def pending_count(connection: sqlite3.Connection) -> int:
     return connection.execute("SELECT COUNT(*) FROM log_events WHERE delivered_utc IS NULL").fetchone()[0]
 
 
-def heartbeat(connection: sqlite3.Connection, host_id: str, result: RunResult) -> dict:
+def heartbeat(
+    connection: sqlite3.Connection, host_id: str, result: RunResult,
+    process_states: dict[str, dict] | None = None,
+) -> dict:
     terminals = []
+    process_states = process_states or {}
     for path in result.paths:
         tid = terminal_id(host_id, path)
         streams = {}
@@ -34,7 +38,10 @@ def heartbeat(connection: sqlite3.Connection, host_id: str, result: RunResult) -
             streams.setdefault(stream, {
                 "file_name": file_name, "generation": generation, "byte_offset": byte_offset
             })
-        terminals.append({"terminal_id": tid, "data_path": str(path), "streams": streams})
+        terminals.append({
+            "terminal_id": tid, "data_path": str(path), "streams": streams,
+            "process": process_states.get(str(path), {"state": "unknown"}),
+        })
     return {
         "observed_at_utc": datetime.now(timezone.utc).isoformat(),
         "terminals": terminals,

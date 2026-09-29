@@ -30,17 +30,20 @@ class WebViewTest(unittest.TestCase):
             "host_id": "host-one", "events": events,
             "heartbeat": {
                 "observed_at_utc": datetime.now(timezone.utc).isoformat(),
-                "terminals": [{"terminal_id": "terminal-one", "data_path": path, "streams": {}}],
+                "terminals": [{
+                    "terminal_id": "terminal-one", "data_path": path, "streams": {},
+                    "process": {"state": "running", "pid": 421},
+                }],
                 "missing": [], "unknown": [], "coverage_configured": False,
                 "pending_count": 2,
             },
         }, "host-one")
 
-    def test_status_does_not_infer_process_health_and_escapes_data(self) -> None:
+    def test_status_uses_explicit_process_state_and_escapes_data(self) -> None:
         page = render_dashboard(self.connection)
         self.assertIn("Collector online", page)
         self.assertIn("Folder found", page)
-        self.assertIn("Process: not checked", page)
+        self.assertIn("Running", page)
         self.assertIn("Expected folders not configured", page)
         self.assertNotIn("<script>", page)
 
