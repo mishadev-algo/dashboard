@@ -7,8 +7,10 @@ import sqlite3
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from collector.protocol import event_id
+from .web import render_dashboard, render_logs
 
 
 MAX_BODY_BYTES = 4 * 1024 * 1024
@@ -52,6 +54,11 @@ def open_database(path: Path) -> sqlite3.Connection:
             pending_count INTEGER NOT NULL,
             payload_json TEXT NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS idx_log_events_received ON log_events(received_utc DESC);
+        CREATE INDEX IF NOT EXISTS idx_log_events_terminal_received
+            ON log_events(host_id, terminal_id, received_utc DESC);
+        CREATE INDEX IF NOT EXISTS idx_heartbeats_host_latest
+            ON collector_heartbeats(host_id, heartbeat_id DESC);
     """)
     return connection
 
@@ -146,6 +153,15 @@ class IngestServer(ThreadingHTTPServer):
 class IngestHandler(BaseHTTPRequestHandler):
     server: IngestServer
 
+    def _respond_html(self, status: int, value: str) -> None:
+        body = value.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _respond(self, status: int, value: dict) -> None:
         body = json.dumps(value).encode("utf-8")
         self.send_response(status)
@@ -153,6 +169,18 @@ class IngestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self) -> None:
+        parsed = urlsplit(self.path)
+        if parsed.path not in ("/", "/logs"):
+            self._respond(404, {"error": "not found"})
+            return
+        connection = open_database(self.server.db_path)
+        try:
+            page = render_dashboard(connection) if parsed.path == "/" else render_logs(connection, parse_qs(parsed.query))
+        finally:
+            connection.close()
+        self._respond_html(200, page)
 
     def do_POST(self) -> None:
         if self.path != "/v1/ingest":

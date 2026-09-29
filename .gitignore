@@ -5,3 +5,5 @@ __pycache__/
 *.sqlite
 *.sqlite3
 *.zip
+*.bundle
+.DS_Store

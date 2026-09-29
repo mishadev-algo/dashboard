@@ -2,7 +2,7 @@
 
 The central API accepts batched MT5 log events and collector heartbeats at `POST /v1/ingest`. It stores them in a separate SQLite database. Each event has a deterministic ID from host ID, terminal ID, stream, file name, generation, and byte offset. The API acknowledges every accepted ID, including a retry of an already stored event. The collector marks only acknowledged local rows as delivered. A lost response therefore causes a safe retry.
 
-This is an ingest prototype. It has no dashboard or alert worker yet. Central PostgreSQL storage, queue limits, and a VPS network trial remain for later work.
+The server also has a read-only status page at `/` and a raw log view at `/logs`. The status page shows collector heartbeat freshness, discovered folders, last received Journal/Experts times, and recent lines containing `error` or `failed`. It does not determine whether an MT5 process is running or connected to its broker. Central PostgreSQL storage, queue limits, the process probe, and alerts remain for later work.
 
 ## Local smoke test on one machine
 
@@ -19,6 +19,8 @@ In the first PowerShell window, replace `YOUR_HOSTNAME` with the exact printed h
 $env:DASHBOARD_HOST_TOKENS = '{"YOUR_HOSTNAME":"YOUR_TOKEN"}'
 py -3.13 -m server --db central.db
 ```
+
+From a browser on the same machine, open `http://127.0.0.1:8765/` for status or `http://127.0.0.1:8765/logs` for filtered raw lines. The server keeps these pages on loopback; they have no login in this prototype.
 
 In a second PowerShell window, use the same token and the existing local collector database:
 
@@ -47,6 +49,6 @@ For an outage test, stop the server with Ctrl+C, wait for a new complete MT5 log
 
 ## Remote setup
 
-Run one central server and register each collector's exact host ID with a distinct token in `DASHBOARD_HOST_TOKENS`. The built-in server binds to `127.0.0.1:8765` by default and does not provide TLS. For a VPS collector to reach a server on another machine, put the API behind an HTTPS reverse proxy and pass its origin as `--server-url https://your-host`. The collector rejects plain HTTP to non-local hosts. Keep tokens in environment variables or a secret store; do not put them in source files or command-line arguments.
+Run one central server and register each collector's exact host ID with a distinct token in `DASHBOARD_HOST_TOKENS`. The built-in server binds only to loopback and does not provide TLS. For a VPS collector to reach a server on another machine, put the API behind an HTTPS reverse proxy and pass its origin as `--server-url https://your-host`. Protect the status and log pages with authentication at that proxy before exposing them remotely. The collector rejects plain HTTP to non-local hosts. Keep tokens in environment variables or a secret store; do not put them in source files or command-line arguments.
 
 The heartbeat stores the discovered terminal paths, latest file cursor for each stream, missing and unknown folder lists, and local pending count. It reports folder discovery, not MT5 process health.

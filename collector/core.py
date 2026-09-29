@@ -144,6 +144,7 @@ class RunResult:
     missing: tuple[str, ...]
     unknown: tuple[str, ...]
     paths: tuple[Path, ...] = ()
+    coverage_configured: bool = False
 
 
 class Collector:
@@ -188,6 +189,7 @@ class Collector:
             missing=tuple(sorted(self.expected - discovered)),
             unknown=tuple(sorted(discovered - self.expected)) if self.expected else (),
             paths=tuple(paths),
+            coverage_configured=bool(self.expected),
         )
 
     def _should_read(self, tid: str, stream: str, path: Path) -> bool:

@@ -40,6 +40,7 @@ def heartbeat(connection: sqlite3.Connection, host_id: str, result: RunResult) -
         "terminals": terminals,
         "missing": list(result.missing),
         "unknown": list(result.unknown),
+        "coverage_configured": result.coverage_configured,
         "pending_count": pending_count(connection),
     }
 

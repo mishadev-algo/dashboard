@@ -1,11 +1,13 @@
-# MT5 log collection and ingest prototype
+# MT5 log dashboard prototype
 
-Python collector for MT5 Journal and Experts logs. It discovers terminal data folders, stores complete lines in local SQLite, and can upload them to a central ingest API with acknowledgements and retry. See [collector usage](docs/collector.md) and [central ingest setup](docs/ingest.md).
+Python collector for MT5 Journal and Experts logs. It discovers terminal data folders, stores complete lines in local SQLite, and uploads them to a central ingest API with acknowledgements and retry. The central server provides a read-only status page and filtered raw logs.
 
-Run fixture checks:
+See [collector usage](docs/collector.md) and [central ingest setup](docs/ingest.md).
+
+Run the fixture checks:
 
 ```text
 python -m unittest discover -s tests -v
 ```
 
-The dashboard and alerts are not included in this prototype. The ingest server currently uses SQLite; live VPS delivery and outage replay still need a network trial.
+The status page reports collector and folder freshness. It does not yet check MT5 process or broker connection state. Alerts and account data are planned for later work.
