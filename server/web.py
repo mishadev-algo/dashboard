@@ -103,16 +103,27 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
         payload = host["payload"]
         status = '<span class="badge good">Collector online</span>' if host["online"] else '<span class="badge bad">Collector offline</span>'
         coverage = (
-            f'Missing: {len(payload.get("missing", []))}; unknown: {len(payload.get("unknown", []))}'
+            f'Expected: {len(payload.get("expected", []))}; missing: {len(payload.get("missing", []))}; '
+            f'archived: {len(payload.get("archived", []))}; unknown: {len(payload.get("unknown", []))}'
             if payload.get("coverage_configured") else "Expected folders not configured"
         )
+        coverage_details = ""
+        if payload.get("coverage_configured"):
+            for label, key in (("Missing expected folders", "missing"), ("Unknown folders", "unknown")):
+                paths = payload.get(key, [])
+                if paths:
+                    coverage_details += (
+                        f'<details><summary>{label}</summary><ul>'
+                        + "".join(f'<li>{_escape(path)}</li>' for path in paths)
+                        + '</ul></details>'
+                    )
         host_html.append(
-            '<div class="panel host-line">'
+            '<div class="panel"><div class="host-line">'
             f'<strong>{_escape(host_id)}</strong>{status}'
             f'<span>Last heartbeat: {_escape(_display_time(host["last_seen"]))}</span>'
             f'<span>{_escape(coverage)}</span>'
             f'<span>Queued at scan: {_escape(payload.get("pending_count", "—"))}</span>'
-            '</div>'
+            '</div>' + coverage_details + '</div>'
         )
     rows = []
     missing_count = 0
@@ -122,12 +133,19 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
         if not host or not host["online"]:
             folder_status = '<span class="badge neutral">Unknown: collector offline</span>'
         else:
+            archived = path.casefold() in host["payload"].get("archived", [])
             current = next(
                 (item for item in host["payload"].get("terminals", [])
                  if isinstance(item, dict) and item.get("terminal_id") == tid), None
             )
-            if current:
+            if archived:
+                folder_status = '<span class="badge neutral">Archived folder</span>'
+            elif current:
                 folder_status = '<span class="badge good">Folder found</span>'
+            else:
+                folder_status = '<span class="badge bad">Folder missing</span>'
+                missing_count += 1
+            if current and not archived:
                 process = current.get("process", {})
                 state = process.get("state") if isinstance(process, dict) else None
                 if state == "running":
@@ -136,9 +154,6 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
                     process_html = '<span class="badge bad">Stopped</span>'
                 elif isinstance(process, dict) and process.get("reason"):
                     process_html += f'<small>{_escape(process["reason"])}</small>'
-            else:
-                folder_status = '<span class="badge bad">Folder missing</span>'
-                missing_count += 1
         log_link = "/logs?" + urlencode({"host": host_id, "terminal": tid})
         rows.append(
             "<tr>"

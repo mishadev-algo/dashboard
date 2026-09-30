@@ -7,3 +7,4 @@ __pycache__/
 *.zip
 *.bundle
 .DS_Store
+inventory.json

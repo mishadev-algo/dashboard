@@ -47,6 +47,8 @@ def heartbeat(
         "terminals": terminals,
         "missing": list(result.missing),
         "unknown": list(result.unknown),
+        "expected": list(result.expected),
+        "archived": list(result.archived),
         "coverage_configured": result.coverage_configured,
         "pending_count": pending_count(connection),
     }

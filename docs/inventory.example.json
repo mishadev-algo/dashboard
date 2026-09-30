@@ -1,0 +1,10 @@
+{
+  "expected": [
+    "C:\\Users\\Administrator\\AppData\\Roaming\\MetaQuotes\\Terminal\\ACTIVE_FOLDER_1",
+    "C:\\Users\\Administrator\\AppData\\Roaming\\MetaQuotes\\Terminal\\ACTIVE_FOLDER_2",
+    "C:\\Users\\Administrator\\AppData\\Roaming\\MetaQuotes\\Terminal\\ACTIVE_FOLDER_3"
+  ],
+  "archived": [
+    "C:\\Users\\Administrator\\AppData\\Roaming\\MetaQuotes\\Terminal\\OLD_FOLDER"
+  ]
+}

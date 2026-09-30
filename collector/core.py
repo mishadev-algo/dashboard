@@ -28,7 +28,7 @@ def is_terminal(path: Path) -> bool:
 
 def discover(roots: Iterable[Path], terminals: Iterable[Path]) -> list[Path]:
     found: dict[str, Path] = {}
-    for root in [*roots, *terminals]:
+    for root in roots:
         candidates = [root]
         if root.is_dir():
             try:
@@ -38,6 +38,9 @@ def discover(roots: Iterable[Path], terminals: Iterable[Path]) -> list[Path]:
         for candidate in candidates:
             if is_terminal(candidate):
                 found[canonical(candidate)] = candidate.resolve()
+    for terminal in terminals:
+        if is_terminal(terminal):
+            found[canonical(terminal)] = terminal.resolve()
     return [found[key] for key in sorted(found)]
 
 
@@ -145,6 +148,8 @@ class RunResult:
     unknown: tuple[str, ...]
     paths: tuple[Path, ...] = ()
     coverage_configured: bool = False
+    expected: tuple[str, ...] = ()
+    archived: tuple[str, ...] = ()
 
 
 class Collector:
@@ -156,16 +161,23 @@ class Collector:
         terminals: Iterable[Path] = (),
         expected: Iterable[Path] = (),
         lookback_days: int = 2,
+        archived: Iterable[Path] = (),
+        coverage_configured: bool | None = None,
     ) -> None:
         self.connection = connection
         self.host_id = host_id
         self.roots = tuple(roots)
         self.terminals = tuple(terminals)
-        self.expected = frozenset(canonical(path) for path in expected)
+        self.expected_paths = tuple(expected)
+        self.expected = frozenset(canonical(path) for path in self.expected_paths)
+        self.archived = frozenset(canonical(path) for path in archived)
+        if self.expected & self.archived:
+            raise ValueError("a folder cannot be both expected and archived")
+        self.coverage_configured = bool(self.expected) if coverage_configured is None else coverage_configured
         self.lookback_days = lookback_days
 
     def run_once(self) -> RunResult:
-        paths = discover(self.roots, self.terminals)
+        paths = discover(self.roots, (*self.terminals, *self.expected_paths))
         discovered = {canonical(path) for path in paths}
         events = 0
         for path in paths:
@@ -187,9 +199,11 @@ class Collector:
             discovered=len(paths),
             events=events,
             missing=tuple(sorted(self.expected - discovered)),
-            unknown=tuple(sorted(discovered - self.expected)) if self.expected else (),
+            unknown=tuple(sorted(discovered - self.expected - self.archived)) if self.coverage_configured else (),
             paths=tuple(paths),
-            coverage_configured=bool(self.expected),
+            coverage_configured=self.coverage_configured,
+            expected=tuple(sorted(self.expected)),
+            archived=tuple(sorted(self.archived)),
         )
 
     def _should_read(self, tid: str, stream: str, path: Path) -> bool:

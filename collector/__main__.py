@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from .core import Collector, open_database, resolve_host_id
+from .inventory import Inventory, load_inventory
 from .process import ProcessProbe
 from .remote import RemoteUploadError, RemoteUploader, heartbeat, pending_count
 
@@ -18,6 +19,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path, action="append", default=[], help="Parent folder to scan (repeatable)")
     parser.add_argument("--terminal", type=Path, action="append", default=[], help="Exact MT5 data folder (repeatable)")
     parser.add_argument("--expected", type=Path, action="append", default=[], help="Expected data folder for coverage (repeatable)")
+    parser.add_argument("--inventory", type=Path, help="JSON inventory file (defaults to inventory.json when present)")
     parser.add_argument("--lookback-days", type=int, default=2, help="Days to scan on first startup (default: 2)")
     parser.add_argument("--follow", action="store_true", help="Keep polling instead of collecting once")
     parser.add_argument("--interval", type=float, default=2.0, help="Polling interval in seconds")
@@ -29,18 +31,28 @@ def main() -> None:
     if args.lookback_days < 0 or args.interval <= 0 or args.pending_warning < 1:
         parser.error("lookback-days must be nonnegative; interval and pending-warning must be positive")
 
+    inventory_path = args.inventory or Path("inventory.json")
+    try:
+        inventory = load_inventory(inventory_path) if args.inventory or inventory_path.is_file() else Inventory()
+    except ValueError as exc:
+        parser.error(str(exc))
+
     roots = list(args.root)
     if not roots and not args.terminal and os.environ.get("APPDATA"):
         roots.append(Path(os.environ["APPDATA"]) / "MetaQuotes" / "Terminal")
-    if not roots and not args.terminal:
-        parser.error("provide --root or --terminal (APPDATA is not set)")
+    if not roots and not args.terminal and not args.expected and not inventory.expected:
+        parser.error("provide --root, --terminal, or expected inventory folders (APPDATA is not set)")
 
     connection = open_database(args.db)
     try:
         host_id = resolve_host_id(connection, args.host_id, socket.gethostname())
     except ValueError as exc:
         parser.error(str(exc))
-    collector = Collector(connection, host_id, roots, args.terminal, args.expected, args.lookback_days)
+    collector = Collector(
+        connection, host_id, roots, args.terminal,
+        (*args.expected, *inventory.expected), args.lookback_days,
+        inventory.archived, inventory.configured or bool(args.expected),
+    )
     uploader = None
     process_probe = None
     if args.server_url:
@@ -69,7 +81,8 @@ def main() -> None:
             warning = " QUEUE_WARNING" if pending >= args.pending_warning else ""
             print(
                 f"discovered={result.discovered} events={result.events} uploaded={uploaded} "
-                f"pending={pending} missing={result.missing} unknown={result.unknown}"
+                f"pending={pending} expected={len(result.expected)} archived={len(result.archived)} "
+                f"missing={result.missing} unknown={result.unknown}"
                 f"{warning}" + (f" upload_error={upload_error}" if upload_error else ""),
                 flush=True,
             )

@@ -53,6 +53,22 @@ class WebViewTest(unittest.TestCase):
         self.assertNotIn("normal journal", page)
         self.assertNotIn("<script>", page)
 
+    def test_archived_folder_is_not_reported_missing(self) -> None:
+        path = r"C:\MetaQuotes\Terminal\FIRST"
+        ingest(self.connection, {
+            "host_id": "host-one", "events": [],
+            "heartbeat": {
+                "observed_at_utc": datetime.now(timezone.utc).isoformat(),
+                "terminals": [], "expected": [], "archived": [path.casefold()],
+                "missing": [], "unknown": [], "coverage_configured": True,
+                "pending_count": 0,
+            },
+        }, "host-one")
+        page = render_dashboard(self.connection)
+        self.assertIn("Archived folder", page)
+        self.assertIn("archived: 1", page)
+        self.assertIn("0 folders missing", page)
+
 
 if __name__ == "__main__":
     unittest.main()

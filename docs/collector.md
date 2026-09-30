@@ -29,6 +29,8 @@ py -3.13 -m collector --db collector.db --host-id vps-92 --root "C:\Users\Admini
 
 The standard `%APPDATA%\MetaQuotes\Terminal` root is used automatically when no `--root` or `--terminal` is supplied. Repeat `--root` for other parent directories and `--terminal` for a specific portable data folder. `--expected` can be repeated to report missing known folders. Without `--follow`, the collector performs one scan and exits.
 
+For persistent coverage, create `inventory.json` in the project directory using [this example](inventory.example.json). Put running terminals in `expected` and old folders that should remain visible but not count as unknown in `archived`. The collector loads this file automatically when launched from that directory; `--inventory PATH` selects another file. Expected paths are scanned as exact terminal folders, so an expected portable folder does not also need `--terminal`. The file is ignored by Git. The console reports expected, archived, missing, and unknown counts or paths.
+
 An MT5 data folder under the standard root has `Logs` and `MQL5\Logs` subfolders. They must be readable by the Windows user running the collector. The collector discovers sibling MT5 folders under the same root automatically.
 
 Run the local fixture checks with:
@@ -43,7 +45,7 @@ The collector currently scans new files from the last two days by default and co
 
 When remote delivery is enabled on Windows, the collector also checks MT5 process executable paths about every 30 seconds. It matches normal installs through each data folder's `origin.txt` and portable installs through a terminal executable in the data folder. If it cannot read an install or process path, it reports process state as `unknown`; log silence alone does not imply a stopped terminal.
 
-The console's `events` number counts newly stored complete lines in that scan. A large first count followed by zero is normal when there are no new lines on disk. `discovered` counts folders found under configured roots. Empty `missing` and `unknown` values do not prove full coverage unless `--expected` was supplied.
+The console's `events` number counts newly stored complete lines in that scan. A large first count followed by zero is normal when there are no new lines on disk. `discovered` counts folders found under configured roots and exact expected paths. Empty `missing` and `unknown` values do not prove full coverage unless `--expected` or an inventory file was supplied.
 
 With remote delivery enabled, `uploaded` counts acknowledged lines in the scan and `pending` counts lines still waiting in the local SQLite database. Existing `collector.db` files with one host ID are upgraded automatically with a delivery column; previously captured lines are queued for the first upload. The collector reuses that existing host ID unless `--host-id` is given. It refuses a database containing multiple host IDs, since those would appear as separate hosts centrally. Keep such a database as an archive and use a new `--db` for the central trial. The collector advances its file cursor only after lines are committed locally, so it can keep reading during a network outage. It marks lines delivered only after the API acknowledges their event IDs. A `QUEUE_WARNING` appears at 100,000 pending lines by default; the queue is not yet capped.
 

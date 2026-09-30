@@ -90,10 +90,12 @@ def ingest(connection: sqlite3.Connection, payload: object, authorized_host: str
         raise ValueError("invalid heartbeat")
     if type(state.get("pending_count")) is not int or state["pending_count"] < 0:
         raise ValueError("invalid pending_count")
-    if not isinstance(state.get("terminals"), list) or not isinstance(state.get("missing"), list) or not isinstance(state.get("unknown"), list):
+    if not isinstance(state.get("terminals"), list):
         raise ValueError("invalid terminal coverage")
-    if not all(isinstance(path, str) for path in state["missing"] + state["unknown"]):
-        raise ValueError("invalid terminal coverage")
+    for name in ("missing", "unknown", "expected", "archived"):
+        paths = state.get(name, [])
+        if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+            raise ValueError("invalid terminal coverage")
     for terminal in state["terminals"]:
         if not isinstance(terminal, dict) or not isinstance(terminal.get("terminal_id"), str) or not isinstance(terminal.get("data_path"), str):
             raise ValueError("invalid terminal")
