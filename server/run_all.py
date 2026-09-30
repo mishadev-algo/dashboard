@@ -59,8 +59,10 @@ def service_plan(args: argparse.Namespace, environ: Mapping[str, str]) -> tuple[
     if args.accounts:
         targets = load_targets(args.accounts)
         expected = {ntpath.normcase(ntpath.normpath(str(path))) for path in inventory.expected}
-        if any(ntpath.normcase(ntpath.normpath(str(target.data_path))) not in expected for target in targets):
-            raise ValueError("every account target must appear in inventory expected")
+        missing = [str(target.data_path) for target in targets
+                   if ntpath.normcase(ntpath.normpath(str(target.data_path))) not in expected]
+        if missing:
+            raise ValueError("account target(s) missing from inventory expected: " + ", ".join(missing))
     if not args.no_alerts and not all(environ.get(key) for key in (
         "DASHBOARD_TELEGRAM_BOT_TOKEN", "DASHBOARD_TELEGRAM_CHAT_ID",
     )):

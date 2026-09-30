@@ -36,6 +36,8 @@ notepad .\accounts.json
 
 Copy `data_path` from each active entry in `inventory.json`; read `login` and `server` from the corresponding MT5 terminal. `day_timezone` defaults to `UTC` if omitted. Use `Etc/GMT-3` for a fixed UTC+3 trading day, or `Europe/Kyiv` if the day follows Kyiv daylight saving time; the string `UTC+3` is invalid. Strategy names are optional; unknown magic numbers remain unmapped. See [the account setup](accounts.md) and [example](accounts.example.json). Do not use the example's placeholder account numbers.
 
+Every `data_path` in `accounts.json` must be present in the `expected` list of `inventory.json`. If the launcher reports a missing account target, compare the two files; add it to `expected` only if that terminal should currently run. Otherwise remove its account entry. Do not put an actively monitored account folder in `archived`.
+
 Install the package needed by the optional account worker:
 
 ```powershell

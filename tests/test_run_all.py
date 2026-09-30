@@ -75,6 +75,13 @@ class OneConsolePlanTest(unittest.TestCase):
         self.assertEqual(host, "vps")
         self.assertEqual([service.name for service in services], ["server", "collector"])
 
+    def test_account_target_missing_from_expected_names_folder(self) -> None:
+        self.accounts.write_text(json.dumps({"terminals": [{
+            "data_path": str(self.root / "TWO"), "login": 123, "server": "Broker",
+        }]}))
+        with self.assertRaisesRegex(ValueError, "account target\\(s\\) missing from inventory expected: .*TWO"):
+            service_plan(self.args, self.environ)
+
 
 if __name__ == "__main__":
     unittest.main()
