@@ -84,6 +84,17 @@ $env:DASHBOARD_TELEGRAM_CHAT_ID = 'YOUR_EXISTING_CHAT_ID'
 
 If the central server accepts several VPS hosts, keep **all** of their host/token pairs in `DASHBOARD_HOST_TOKENS`. The entry for this VPS must match `DASHBOARD_COLLECTOR_TOKEN`.
 
+PowerShell environment variables are local to the current window. If the launcher says the collector token is missing or differs, use the existing server token map in the **same window** to set the matching collector token without displaying it. Replace the database filename if needed:
+
+```powershell
+$hostId = py -3.13 -c "import sqlite3,socket; from collector.core import resolve_host_id; c=sqlite3.connect('collector-central.db'); print(resolve_host_id(c,None,socket.gethostname())); c.close()"
+$tokenMap = $env:DASHBOARD_HOST_TOKENS | ConvertFrom-Json
+$env:DASHBOARD_COLLECTOR_TOKEN = $tokenMap.PSObject.Properties[$hostId].Value
+if (-not $env:DASHBOARD_COLLECTOR_TOKEN) { throw "No server token for host $hostId; check DASHBOARD_HOST_TOKENS" }
+```
+
+This uses the token already in `DASHBOARD_HOST_TOKENS`. If that map contains an example value, replace it with the real token before starting the launcher.
+
 ## 4. Start everything in one window
 
 Replace `collector-central.db` with your existing collector DB name if different:

@@ -50,8 +50,10 @@ def service_plan(args: argparse.Namespace, environ: Mapping[str, str]) -> tuple[
     if not isinstance(host_tokens, dict) or not isinstance(host_tokens.get(host_id), str):
         raise ValueError(f"DASHBOARD_HOST_TOKENS has no token for collector host {host_id!r}")
     token = environ.get("DASHBOARD_COLLECTOR_TOKEN", "")
-    if not token or token != host_tokens[host_id]:
-        raise ValueError("DASHBOARD_COLLECTOR_TOKEN must match the server token for this host")
+    if not token:
+        raise ValueError("DASHBOARD_COLLECTOR_TOKEN is not set in this PowerShell window")
+    if token != host_tokens[host_id]:
+        raise ValueError(f"DASHBOARD_COLLECTOR_TOKEN differs from DASHBOARD_HOST_TOKENS for host {host_id!r}")
     if args.port < 1 or args.port > 65535:
         raise ValueError("port must be between 1 and 65535")
     if args.accounts:

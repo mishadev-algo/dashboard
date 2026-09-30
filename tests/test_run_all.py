@@ -55,8 +55,12 @@ class OneConsolePlanTest(unittest.TestCase):
 
     def test_wrong_token_or_missing_inventory_fails_before_start(self) -> None:
         bad = dict(self.environ, DASHBOARD_COLLECTOR_TOKEN="wrong")
-        with self.assertRaisesRegex(ValueError, "must match"):
+        with self.assertRaisesRegex(ValueError, "differs from DASHBOARD_HOST_TOKENS"):
             service_plan(self.args, bad)
+        missing_token = dict(self.environ)
+        del missing_token["DASHBOARD_COLLECTOR_TOKEN"]
+        with self.assertRaisesRegex(ValueError, "not set in this PowerShell window"):
+            service_plan(self.args, missing_token)
         self.inventory.unlink()
         with self.assertRaisesRegex(ValueError, "inventory file is missing"):
             service_plan(self.args, self.environ)
