@@ -1,0 +1,17 @@
+# Replace dashboard.example.com and the bcrypt hash before use.
+# Keep the Python server bound to 127.0.0.1:8765.
+dashboard.example.com {
+    @collector {
+        method POST
+        path /v1/ingest /v1/snapshot
+    }
+    handle @collector {
+        reverse_proxy 127.0.0.1:8765
+    }
+    handle {
+        basic_auth {
+            operator REPLACE_WITH_CADDY_PASSWORD_HASH
+        }
+        reverse_proxy 127.0.0.1:8765
+    }
+}

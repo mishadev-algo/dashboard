@@ -10,7 +10,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from collector.protocol import event_id
-from .web import render_dashboard, render_logs
+from .snapshots import ensure_schema, store_snapshot
+from .web import render_accounts, render_dashboard, render_logs
 
 
 MAX_BODY_BYTES = 4 * 1024 * 1024
@@ -73,6 +74,7 @@ def open_database(path: Path) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_heartbeats_host_latest
             ON collector_heartbeats(host_id, heartbeat_id DESC);
     """)
+    ensure_schema(connection)
     return connection
 
 
@@ -187,18 +189,23 @@ class IngestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlsplit(self.path)
-        if parsed.path not in ("/", "/logs"):
+        if parsed.path not in ("/", "/logs", "/accounts"):
             self._respond(404, {"error": "not found"})
             return
         connection = open_database(self.server.db_path)
         try:
-            page = render_dashboard(connection) if parsed.path == "/" else render_logs(connection, parse_qs(parsed.query))
+            if parsed.path == "/":
+                page = render_dashboard(connection)
+            elif parsed.path == "/logs":
+                page = render_logs(connection, parse_qs(parsed.query))
+            else:
+                page = render_accounts(connection, parse_qs(parsed.query))
         finally:
             connection.close()
         self._respond_html(200, page)
 
     def do_POST(self) -> None:
-        if self.path != "/v1/ingest":
+        if self.path not in ("/v1/ingest", "/v1/snapshot"):
             self._respond(404, {"error": "not found"})
             return
         authorization = self.headers.get("Authorization", "")
@@ -219,7 +226,8 @@ class IngestHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             connection = open_database(self.server.db_path)
             try:
-                result = ingest(connection, payload, authorized_host)
+                result = (ingest(connection, payload, authorized_host) if self.path == "/v1/ingest"
+                          else store_snapshot(connection, payload, authorized_host))
             finally:
                 connection.close()
         except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:

@@ -8,3 +8,7 @@ __pycache__/
 *.bundle
 .DS_Store
 inventory.json
+accounts.json
+backups/
+alpha-audit*.json
+Caddyfile

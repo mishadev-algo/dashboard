@@ -1,0 +1,20 @@
+{
+  "terminals": [
+    {
+      "data_path": "C:\\Users\\Administrator\\AppData\\Roaming\\MetaQuotes\\Terminal\\ACTIVE_FOLDER_1",
+      "login": 12345678,
+      "server": "BROKER_SERVER_EXACT_NAME",
+      "day_timezone": "UTC",
+      "history_days": 7,
+      "strategies": {"1001": "Example strategy"}
+    },
+    {
+      "data_path": "C:\\Users\\Administrator\\AppData\\Roaming\\MetaQuotes\\Terminal\\ACTIVE_FOLDER_2",
+      "login": 87654321,
+      "server": "BROKER_SERVER_EXACT_NAME",
+      "day_timezone": "UTC",
+      "history_days": 7,
+      "strategies": {}
+    }
+  ]
+}

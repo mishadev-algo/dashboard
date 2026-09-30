@@ -3,8 +3,10 @@ from __future__ import annotations
 import html
 import json
 import sqlite3
+from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 
 STALE_AFTER_SECONDS = 30
@@ -55,7 +57,7 @@ form {{ display: flex; flex-wrap: wrap; gap: .65rem; align-items: end; margin: 1
 label {{ display: grid; gap: .25rem; font-size: .85rem; color: #40546e; }} input,select,button {{ font: inherit; padding: .48rem .6rem; border: 1px solid #aebccc; border-radius: 5px; }}
 button {{ background: #245aa0; color: white; border-color: #245aa0; cursor: pointer; }}
 pre {{ margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: .84rem/1.45 ui-monospace,monospace; }}
-</style></head><body><header><strong>MT5 dashboard</strong><nav><a href="/">Status</a><a href="/logs">Logs</a></nav></header>
+</style></head><body><header><strong>MT5 dashboard</strong><nav><a href="/">Status</a><a href="/logs">Logs</a><a href="/accounts">Accounts</a></nav></header>
 <main>{body}</main></body></html>"""
 
 
@@ -88,6 +90,12 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
         "FROM terminals t LEFT JOIN log_events e ON e.host_id=t.host_id AND e.terminal_id=t.terminal_id "
         "GROUP BY t.host_id,t.terminal_id,t.data_path ORDER BY t.host_id,t.data_path", (cutoff,)
     ).fetchall()
+    snapshots = {
+        (host_id, tid): (received, json.loads(status_json))
+        for host_id, tid, received, status_json in connection.execute(
+            "SELECT host_id,terminal_id,received_utc,status_json FROM terminal_status"
+        )
+    }
     observed = sum(len(host["payload"].get("terminals", [])) for host in hosts.values() if host["online"])
     offline = sum(not host["online"] for host in hosts.values())
     text_errors = sum(row[5] or 0 for row in terminal_rows)
@@ -130,6 +138,8 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
     for host_id, tid, path, journal_time, experts_time, errors in terminal_rows:
         host = hosts.get(host_id)
         process_html = '<span class="badge neutral">Unknown</span>'
+        broker_html = '<span class="badge neutral">Unknown</span>'
+        autotrading_html = '<span class="badge neutral">Unknown</span>'
         if not host or not host["online"]:
             folder_status = '<span class="badge neutral">Unknown: collector offline</span>'
         else:
@@ -154,11 +164,32 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
                     process_html = '<span class="badge bad">Stopped</span>'
                 elif isinstance(process, dict) and process.get("reason"):
                     process_html += f'<small>{_escape(process["reason"])}</small>'
+                snapshot = snapshots.get((host_id, tid))
+                if state == "running" and snapshot:
+                    received, status = snapshot
+                    age = now - (_parsed_time(received) or datetime.min.replace(tzinfo=timezone.utc))
+                    if timedelta(0) <= age <= timedelta(seconds=150):
+                        if status.get("state") == "account_mismatch":
+                            broker_html = '<span class="badge bad">Account mismatch</span>'
+                        elif status.get("state") == "ok":
+                            if status.get("connected") is True:
+                                broker_html = '<span class="badge good">Connected</span>'
+                            elif status.get("connected") is False:
+                                broker_html = '<span class="badge bad">Disconnected</span>'
+                            if status.get("autotrading") is True:
+                                autotrading_html = '<span class="badge good">Enabled</span>'
+                            elif status.get("autotrading") is False:
+                                autotrading_html = '<span class="badge bad">Disabled</span>'
+                        if status.get("reason"):
+                            broker_html += f'<small>{_escape(status["reason"])}</small>'
+                    else:
+                        broker_html = '<span class="badge neutral">Stale probe</span>'
         log_link = "/logs?" + urlencode({"host": host_id, "terminal": tid})
         rows.append(
             "<tr>"
             f'<td><a href="{_escape(log_link)}">{_escape(path.rsplit(chr(92), 1)[-1])}</a><small>{_escape(path)}</small></td>'
             f'<td>{_escape(host_id)}</td><td>{folder_status}</td><td>{process_html}</td>'
+            f'<td>{broker_html}</td><td>{autotrading_html}</td>'
             f'<td>{_escape(_display_time(journal_time))}</td><td>{_escape(_display_time(experts_time))}</td>'
             f'<td>{errors or 0}</td></tr>'
         )
@@ -180,14 +211,14 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
     body = (
         '<h1>Collector and terminal folders</h1>'
         '<p class="muted">Receive times are UTC. Quiet logs do not imply that MT5 is stopped.</p>'
-        '<div class="note">Process state uses a read-only Windows process check matched to each installation path. '
-        'Unknown means the match could not be established. Broker connection and AutoTrading are not checked yet.</div>'
+        '<div class="note">Process state comes from the Windows process check. Broker and AutoTrading state '
+        'come from a separate account probe and become stale after 150 seconds. Unknown means no verified reading.</div>'
         f'<div class="cards">{cards}</div>'
         '<h2>Collectors</h2>' + ('<div class="host-list">' + "".join(host_html) + '</div>' if host_html else '<p>No heartbeats yet.</p>')
         + f'<h2>Terminals <small class="muted">({len(rows)} known; {missing_count} folders missing from online hosts)</small></h2>'
         + '<div class="table-wrap"><table><thead><tr><th>Data folder</th><th>Host</th><th>Folder state</th><th>MT5 process</th>'
-        '<th>Last Journal</th><th>Last Experts</th><th>Error text, 24h</th></tr></thead><tbody>'
-        + ("".join(rows) if rows else '<tr><td colspan="7">No terminals received yet.</td></tr>')
+        '<th>Broker</th><th>AutoTrading</th><th>Last Journal</th><th>Last Experts</th><th>Error text, 24h</th></tr></thead><tbody>'
+        + ("".join(rows) if rows else '<tr><td colspan="9">No terminals received yet.</td></tr>')
         + '</tbody></table></div>'
         + '<h2>Alerts</h2><div class="table-wrap"><table><thead><tr><th>Host</th><th>Type</th><th>State</th>'
         '<th>Detail</th><th>Changed</th><th>Last sent</th></tr></thead><tbody>'
@@ -195,6 +226,98 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
         + '</tbody></table></div>'
     )
     return _page("Status", body)
+
+
+def render_accounts(connection: sqlite3.Connection, params: dict[str, list[str]], now: datetime | None = None) -> str:
+    now = now or datetime.now(timezone.utc)
+    chosen_day = (params.get("day", [""])[0] or "").strip()
+    if chosen_day:
+        try:
+            datetime.strptime(chosen_day, "%Y-%m-%d")
+        except ValueError:
+            chosen_day = ""
+    accounts = connection.execute(
+        "SELECT server,login,currency,day_timezone,host_id,terminal_id,latest_snapshot_utc,history_start_day "
+        "FROM accounts ORDER BY server,login"
+    ).fetchall()
+    sections = []
+    for server, login, currency, day_timezone, host_id, tid, received, history_start in accounts:
+        local_day = chosen_day or now.astimezone(ZoneInfo(day_timezone)).date().isoformat()
+        latest_day = (_parsed_time(received) or now).astimezone(ZoneInfo(day_timezone)).date().isoformat()
+        rows = connection.execute(
+            "SELECT kind,strategy,profit,commission,swap,fee FROM deals "
+            "WHERE server=? AND login=? AND day_local=?", (server, login, local_day),
+        ).fetchall()
+        trade_rows = [row for row in rows if row[0] in ("trade", "commission")]
+        cash_rows = [row for row in rows if row[0] == "cash"]
+        amount = lambda row: sum((Decimal(value) for value in row[2:]), Decimal(0))
+        pnl = sum((amount(row) for row in trade_rows), Decimal(0))
+        cash = sum((amount(row) for row in cash_rows), Decimal(0))
+        by_strategy: dict[str, tuple[Decimal, int]] = {}
+        for row in trade_rows:
+            label = row[1] if row[0] == "trade" else "unallocated commission"
+            previous, count = by_strategy.get(label, (Decimal(0), 0))
+            by_strategy[label] = (previous + amount(row), count + 1)
+        position_rows = connection.execute(
+            "SELECT ticket,symbol,type,strategy,volume,price_open,price_current,profit,swap "
+            "FROM positions WHERE server=? AND login=? ORDER BY symbol,ticket", (server, login),
+        ).fetchall()
+        status_row = connection.execute(
+            "SELECT received_utc,status_json FROM terminal_status WHERE host_id=? AND terminal_id=?",
+            (host_id, tid),
+        ).fetchone()
+        age = now - (_parsed_time(received) or datetime.min.replace(tzinfo=timezone.utc))
+        complete_latest = bool(status_row and status_row[0] == received and
+                               json.loads(status_row[1]).get("data_complete") is True)
+        freshness = ('<span class="badge good">Current snapshot</span>' if complete_latest and timedelta(0) <= age <= timedelta(seconds=150)
+                     else '<span class="badge neutral">Stale snapshot</span>')
+        coverage = (
+            f'History collected from {_escape(history_start)} through the latest snapshot.'
+            if history_start <= local_day <= latest_day else 'Selected day is outside collected history; PnL is unavailable.'
+        )
+        pnl_text = f'{pnl:.2f} {_escape(currency)}' if history_start <= local_day <= latest_day else '—'
+        cash_text = f'{cash:.2f} {_escape(currency)}' if history_start <= local_day <= latest_day else '—'
+        positions_html = "".join(
+            '<tr>'
+            f'<td>{_escape(ticket)}</td><td>{_escape(symbol)}</td>'
+            f'<td>{"Buy" if side == 0 else "Sell" if side == 1 else _escape(side)}</td>'
+            f'<td>{_escape(strategy)}</td><td>{volume:g}</td>'
+            f'<td>{price_open:g}</td><td>{price_current:g}</td>'
+            f'<td>{_escape(profit)}</td><td>{_escape(swap)}</td></tr>'
+            for ticket, symbol, side, strategy, volume, price_open, price_current, profit, swap in position_rows
+        )
+        strategy_html = "".join(
+            f'<tr><td>{_escape(strategy)}</td><td>{count}</td><td>{value:.2f} {_escape(currency)}</td></tr>'
+            for strategy, (value, count) in sorted(by_strategy.items())
+        )
+        sections.append(
+            f'<section class="panel"><h2>{_escape(server)} / {_escape(login)} {freshness}</h2>'
+            f'<p class="muted">Host {_escape(host_id)} · terminal {_escape(tid)} · '
+            f'currency {_escape(currency)} · day zone {_escape(day_timezone)} · '
+            f'last complete snapshot {_escape(_display_time(received))}</p>'
+            f'<p><strong>{_escape(local_day)} realized trading PnL: {pnl_text}</strong> '
+            f'({len(trade_rows)} trade/commission deals). Cash transfers: {cash_text} ({len(cash_rows)} deals).</p>'
+            f'<p class="muted">{coverage} Trading PnL sums deal profit, commission, swap, and fee. '
+            'Other account adjustments are excluded.</p>'
+            '<h3>Strategy PnL</h3><div class="table-wrap"><table><thead><tr>'
+            '<th>Strategy</th><th>Deals</th><th>Realized PnL</th></tr></thead><tbody>'
+            + (strategy_html if history_start <= local_day <= latest_day and strategy_html
+               else '<tr><td colspan="3">No mapped trade deals for this day.</td></tr>')
+            + '</tbody></table></div>'
+            '<h3>Open positions</h3><div class="table-wrap"><table><thead><tr>'
+            '<th>Ticket</th><th>Symbol</th><th>Side</th><th>Strategy</th><th>Volume</th>'
+            '<th>Open</th><th>Current</th><th>Profit</th><th>Swap</th></tr></thead><tbody>'
+            + (positions_html if positions_html else '<tr><td colspan="9">No open positions in the last complete snapshot.</td></tr>')
+            + '</tbody></table></div></section>'
+        )
+    body = (
+        '<h1>Accounts and PnL</h1>'
+        '<p class="muted">All values come from verified read-only MT5 snapshots. The selected day uses each account’s configured time zone.</p>'
+        '<form method="get" action="/accounts"><label>Day<input type="date" name="day" value="'
+        + _escape(chosen_day) + '"></label><button type="submit">Show</button></form>'
+        + ('<div class="host-list">' + "".join(sections) + '</div>' if sections else '<p>No verified account snapshots yet.</p>')
+    )
+    return _page("Accounts", body)
 
 
 def render_logs(connection: sqlite3.Connection, params: dict[str, list[str]]) -> str:

@@ -19,6 +19,7 @@ from .ingest import open_database
 OFFLINE_AFTER = timedelta(seconds=30)
 RETRY_AFTER = timedelta(seconds=60)
 COOLDOWN = timedelta(minutes=30)
+PROBE_STALE_AFTER = timedelta(seconds=150)
 
 
 def _parse(value: str | None) -> datetime | None:
@@ -36,9 +37,10 @@ def _elapsed(now: datetime, value: str | None, duration: timedelta) -> bool:
     return then is None or now - then >= duration
 
 
-def _observations(connection: sqlite3.Connection, now: datetime) -> tuple[dict[tuple[str, str, str], str], set[str]]:
+def _observations(connection: sqlite3.Connection, now: datetime) -> tuple[dict[tuple[str, str, str], str], set[str], set[tuple[str, str, str]]]:
     desired: dict[tuple[str, str, str], str] = {}
     offline_hosts: set[str] = set()
+    held: set[tuple[str, str, str]] = set()
     rows = connection.execute(
         "SELECT h.host_id,h.last_heartbeat_utc,c.payload_json FROM hosts h "
         "LEFT JOIN collector_heartbeats c ON c.heartbeat_id=("
@@ -63,21 +65,43 @@ def _observations(connection: sqlite3.Connection, now: datetime) -> tuple[dict[t
             if isinstance(item, dict) and isinstance(item.get("data_path"), str)
         }
         for key, path in expected.items():
+            broker_key = (host_id, "broker_disconnected", key)
+            held.add(broker_key)
             if key in missing:
                 desired[(host_id, "folder_missing", key)] = f"Expected MT5 folder missing on {host_id}: {path}"
             elif key in terminals and isinstance(terminals[key].get("process"), dict) and terminals[key]["process"].get("state") == "stopped":
                 desired[(host_id, "terminal_stopped", key)] = f"MT5 process stopped on {host_id}: {path}"
-    return desired, offline_hosts
+            elif (key in terminals and isinstance(terminals[key].get("process"), dict)
+                  and terminals[key]["process"].get("state") == "running"):
+                tid = terminals[key].get("terminal_id")
+                row = connection.execute(
+                    "SELECT received_utc,status_json FROM terminal_status WHERE host_id=? AND terminal_id=?",
+                    (host_id, tid),
+                ).fetchone()
+                if row:
+                    received = _parse(row[0])
+                    if received and timedelta(0) <= now - received <= PROBE_STALE_AFTER:
+                        try:
+                            status = json.loads(row[1])
+                        except (TypeError, json.JSONDecodeError):
+                            status = {}
+                        if status.get("state") == "ok" and status.get("connected") is False:
+                            desired[broker_key] = f"Broker disconnected on {host_id}: {path}"
+                            held.discard(broker_key)
+                        elif status.get("state") == "ok" and status.get("connected") is True:
+                            held.discard(broker_key)
+    return desired, offline_hosts, held
 
 
 def evaluate(
     connection: sqlite3.Connection, send: Callable[[str], None], now: datetime | None = None,
     cooldown: timedelta = COOLDOWN, retry_after: timedelta = RETRY_AFTER,
+    report: Callable[[str], None] | None = None,
 ) -> None:
     """Evaluate current states; send is an injectable function accepting one text message."""
     now = now or datetime.now(timezone.utc)
     stamp = now.isoformat()
-    desired, offline_hosts = _observations(connection, now)
+    desired, offline_hosts, held = _observations(connection, now)
     existing = {
         (row[0], row[1], row[2]): row
         for row in connection.execute(
@@ -112,10 +136,12 @@ def evaluate(
         last_sent = row[7] if row else None
         notified = bool(row[8]) if row else False
         if _elapsed(now, attempt, retry_after) and (not notified or _elapsed(now, last_sent, cooldown)):
-            _send(connection, send, key, detail, stamp, active=True)
+            _send(connection, send, key, detail, stamp, active=True, report=report)
 
     for key, row in existing.items():
         if key in desired or row[3] == "resolved":
+            continue
+        if key in held:
             continue
         if key[0] in offline_hosts and key[1] != "collector_offline":
             continue  # Terminal state is unknown while its collector is offline.
@@ -129,10 +155,13 @@ def evaluate(
             if new_state == "resolved":
                 continue
         if _elapsed(now, row[6] if row[3] == "recovering" else None, retry_after):
-            _send(connection, send, key, f"Recovered: {row[4]}", stamp, active=False)
+            _send(connection, send, key, f"Recovered: {row[4]}", stamp, active=False, report=report)
 
 
-def _send(connection: sqlite3.Connection, send: Callable[[str], None], key: tuple[str, str, str], message: str, stamp: str, active: bool) -> None:
+def _send(
+    connection: sqlite3.Connection, send: Callable[[str], None], key: tuple[str, str, str],
+    message: str, stamp: str, active: bool, report: Callable[[str], None] | None = None,
+) -> None:
     with connection:
         connection.execute(
             "UPDATE alerts SET last_attempt_utc=? WHERE host_id=? AND alert_type=? AND target=?",
@@ -146,6 +175,8 @@ def _send(connection: sqlite3.Connection, send: Callable[[str], None], key: tupl
                 "UPDATE alerts SET last_error=? WHERE host_id=? AND alert_type=? AND target=?",
                 (str(exc)[:200], *key),
             )
+        if report:
+            report(f"{key[0]} {key[1]}: delivery failed ({str(exc)[:200]})")
         return
     with connection:
         connection.execute(
@@ -153,6 +184,8 @@ def _send(connection: sqlite3.Connection, send: Callable[[str], None], key: tupl
             "WHERE host_id=? AND alert_type=? AND target=?",
             ("active" if active else "resolved", stamp, 1 if active else 0, *key),
         )
+    if report:
+        report(f"{key[0]} {key[1]}: {'alert' if active else 'recovery'} sent")
 
 
 class TelegramSender:
@@ -168,10 +201,19 @@ class TelegramSender:
         try:
             with urlopen(request, timeout=10) as response:
                 result = json.load(response)
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError):
+        except HTTPError as exc:
+            try:
+                description = json.load(exc).get("description", "")
+            except (OSError, ValueError, AttributeError):
+                description = ""
+            reason = f": {description[:150]}" if isinstance(description, str) and description else ""
+            raise RuntimeError(f"Telegram HTTP {exc.code}{reason}") from None
+        except (URLError, TimeoutError, OSError, ValueError):
             raise RuntimeError("Telegram request failed") from None
         if not isinstance(result, dict) or result.get("ok") is not True:
-            raise RuntimeError("Telegram rejected the message")
+            description = result.get("description", "") if isinstance(result, dict) else ""
+            reason = f": {description[:150]}" if isinstance(description, str) and description else ""
+            raise RuntimeError(f"Telegram rejected the message{reason}")
 
 
 def main() -> None:
@@ -186,9 +228,15 @@ def main() -> None:
     except (KeyError, ValueError):
         parser.error("set DASHBOARD_TELEGRAM_BOT_TOKEN and DASHBOARD_TELEGRAM_CHAT_ID")
     connection = open_database(args.db)
+    print(f"alert worker started; database={args.db}; interval={args.interval:g}s", flush=True)
+    next_status = time.monotonic() + 60
     try:
         while True:
-            evaluate(connection, sender)
+            evaluate(connection, sender, report=lambda line: print(line, flush=True))
+            if time.monotonic() >= next_status:
+                count = connection.execute("SELECT COUNT(*) FROM alerts WHERE state!='resolved'").fetchone()[0]
+                print(f"alert worker running; open alerts={count}", flush=True)
+                next_status = time.monotonic() + 60
             time.sleep(args.interval)
     except KeyboardInterrupt:
         pass

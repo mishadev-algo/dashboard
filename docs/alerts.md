@@ -1,6 +1,6 @@
 # Telegram health alerts
 
-The optional alert worker reads the central SQLite database and sends health transitions through the [Telegram Bot API `sendMessage`](https://core.telegram.org/bots/api#sendmessage). It covers a collector whose last heartbeat is over 30 seconds old, an expected terminal folder reported missing, and an expected terminal whose Windows process probe explicitly reports `stopped`. `unknown` process state and quiet logs do not trigger a stopped alert. Broker connection and repeated log errors are not classified yet.
+The optional alert worker reads the central SQLite database and sends health transitions through the [Telegram Bot API `sendMessage`](https://core.telegram.org/bots/api#sendmessage). It covers a collector whose last heartbeat is over 30 seconds old, an expected terminal folder reported missing, an expected terminal whose Windows process probe explicitly reports `stopped`, and a fresh account probe that explicitly reports broker disconnection. `unknown` or stale process/broker state and quiet logs do not trigger a stopped or broker alert. Repeated log errors are not classified yet.
 
 Create a bot with BotFather and obtain the destination chat ID. In a **third** PowerShell window on the central server, from `C:\dashboard`, set these only in that window or in the server's secret store:
 
