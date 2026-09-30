@@ -14,7 +14,7 @@ Install `MetaTrader5` and `tzdata` in the same Python installation that runs the
 py -3.13 -m pip install MetaTrader5 tzdata
 ```
 
-Copy [accounts.example.json](accounts.example.json) to `accounts.json` and replace every sample value. Add each active terminal that should have account data. Use the exact data-folder path, current MT5 login, and broker server shown in MT5. Set `day_timezone` to the time zone used when comparing a day in MT5 History; `UTC` is the default. If strategy magic numbers are known, map them to names in `strategies`. Unmapped positions and trades stay labeled `unmapped`. Account passwords do not belong in the file.
+The worker does not generate `accounts.json`. Copy [accounts.example.json](accounts.example.json) to `accounts.json` and replace every sample value. Add each active terminal that should have account data. Copy its exact data-folder path from `inventory.json`, then read its current login and broker server from MT5. These expected values prevent data from a switched or mismatched account being attributed to the wrong terminal. Set `day_timezone` to the time zone used when comparing a day in MT5 History; `UTC` is the default. If strategy magic numbers are known, map them to names in `strategies`. Unmapped positions and trades stay labeled `unmapped`. Account passwords do not belong in the file. The file is ignored by Git and stays on the VPS.
 
 Restart the central server after updating its source. In another PowerShell window on the VPS, use the **same host ID and collector token** as the log collector:
 
