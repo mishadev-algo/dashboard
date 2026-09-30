@@ -1,8 +1,8 @@
 # Dashboard alpha — project status
 
 **Updated:** 2026-09-30
-**Phase:** Collector, ingest, and first read-only status/log page prototype. Three active VPS data folders have both log streams in the user's local SQLite output. The first VPS loopback upload succeeded; the user reports completing the outage/recovery test and installing the status/log page. Persistent expected-terminal inventory is implemented locally. Real midnight rollover and live expected-terminal coverage remain deferred. Alerts and account data are not implemented.
-**Active ticket:** Deploy the updated code and one-time terminal inventory on the VPS; inspect the dashboard coverage and Windows process probe when the user resumes VPS checks. Owner: Codex for package/instructions; VPS operator for live verification.
+**Phase:** Collector, ingest, status/log page, persistent terminal inventory, and local Telegram health-alert prototype. The user reports installing the inventory update on the VPS, but has not supplied the new collector output or page state. Real midnight rollover and live expected-terminal coverage remain deferred. Account data is not implemented.
+**Active ticket:** Configure a Telegram destination and verify one failure/recovery alert on the VPS when convenient. Owner: Codex for alert implementation and package; VPS operator for bot/chat configuration and live verification.
 **Current milestone acceptance:** The page shows collector heartbeat, folder discovery, and separate MT5 process `running`/`stopped`/`unknown` state, plus filtered Journal/Experts logs. A stopped state requires a readable installation path and complete Windows process list; broker connection and AutoTrading remain separate.
 
 ## Verified so far
@@ -21,6 +21,8 @@
 - The first status-page slice added `GET /` for collector/folder status and `GET /logs` for filtered raw lines. It distinguishes stale collector, missing folder, and quiet log timestamps. The Git bundle remains the earlier ingest-only commit; the updated source ZIP includes the page.
 - The user then reported installing the status/log page on the VPS; no screenshot or page output was supplied. A further local slice adds a nonblocking Windows process query matched through `origin.txt` or a portable executable and sends `running`/`stopped`/`unknown` separately from log freshness. Sixteen fast local tests pass, including path matching and inaccessible-process fallback. This process probe is packaged but has not been validated on the VPS.
 - A local `inventory.json` now persists expected and archived terminal paths; expected portable paths are scanned directly, and the server page shows coverage counts and missing/unknown path details. Nineteen fast local tests pass, including inventory classification, overlap validation, and archived-folder status. The VPS inventory and process state remain unverified.
+- On September 30, the user replied "done" after the instructions to install the updated source package, create the inventory with three expected folders and one archived folder, and restart both processes. This confirms completion as reported by the operator; the expected/missing/unknown output and dashboard process states were not supplied for independent verification.
+- A local alert worker now persists collector-offline, expected-folder-missing, and explicitly stopped-terminal states, with Telegram send/retry/cooldown/recovery logic and visible UI state. Twenty-two fast local tests pass, including simulated alert delivery and recovery with a fake sender. The updated source ZIP contains the worker; no Telegram destination or live delivery has been verified.
 - See [collector usage](docs/collector.md).
 
 ## Prioritized backlog
@@ -31,7 +33,7 @@
 | P0 | Define ingestion contract and storage | Local and central SQLite schemas, idempotent API acknowledgements, and host heartbeats are implemented and fixture-tested. Validate live delivery; choose hosting and move central storage to PostgreSQL before release. |
 | P0 | Build all-terminal log listener | Fixture discovery/tailing and simulated outage replay are verified. Validate real MT5 encoding/access, midnight rollover, and API outage/recovery with no lost or duplicate lines. |
 | P1 | Show terminal health and logs | Dashboard distinguishes stopped terminal, stale collector, missing folder, and quiet logs; operator can filter raw logs by terminal and stream. |
-| P1 | Add actionable Telegram alerts | A simulated failure sends one alert and one recovery message, with cooldown and visible alert state. |
+| P1 | Add actionable Telegram alerts | Local prototype covers collector offline, expected folder missing, and stopped process with simulated send/recovery/cooldown. Configure a destination and verify live delivery; broker disconnect and selected repeated errors remain. |
 | P1 | Add account positions and realized PnL | Two accounts reconcile against MT5 History; account changes do not mix deals; unmapped strategy trades remain marked unmapped. |
 | P1 | Run alpha trial | Trial crosses a trading day and midnight; every expected terminal is accounted for, logs replay once after an outage, health and alerts behave correctly, and PnL reconciles. |
 
@@ -39,7 +41,7 @@
 
 - [mt5-list.md](mt5-list.md) supplies one VPS label, MT5 data path, and account label. The total number of Windows hosts, users, MT5 installs, portable folders, and access to them is not documented yet.
 - Log encoding, buffering, file replacement behavior, midnight rollover, and Windows permissions need validation on real terminals. Fixture tests do not cover midnight or an API outage.
-- Hosting location, secure collector connectivity, and Telegram destination are undecided.
+- Hosting location, secure collector connectivity, and Telegram destination are undecided. The alert worker is optional until a bot token and chat ID are configured.
 - The current VPS `collector.db` appears to contain two host IDs for the same three folders. Confirm the IDs on the VPS and use a fresh database for the central trial unless the historical records are reconciled. Keep the old database as an archive.
 - The local upload queue has a warning threshold but no hard bound or automatic alert yet. The built-in ingest server requires an HTTPS reverse proxy for remote use.
 - Broker connection and AutoTrading status require a per-terminal probe; logs alone cannot prove those states.
@@ -47,7 +49,7 @@
 
 ## Next concrete action
 
-Copy the updated source package to the VPS, create `inventory.json` with the three active folder paths in `expected` and the historical fourth folder in `archived`, then restart both collector and central server and inspect `http://127.0.0.1:8765/`. This is a short smoke check; the longer midnight rollover and full coverage trial remain deferred. After this, implement actionable Telegram alerts. Before remote exposure, rotate the token and choose an authenticated HTTPS endpoint. Collect other host roots before alpha release. Confirm the old database's two apparent host IDs separately; the fresh trial database avoids mixing them.
+Run the optional alert worker against the same `central.db` once the VPS operator has a bot token and chat ID. Verify one simulated failure and recovery on the VPS when convenient. Also collect one collector output line showing `expected=3 archived=1 missing=() unknown=()` and inspect process states on the page; these are short checks, while midnight rollover and the full coverage trial remain deferred. Before remote exposure, rotate the token and choose an authenticated HTTPS endpoint. Collect other host roots before alpha release.
 
 ## PM check-in format
 

@@ -162,6 +162,21 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
             f'<td>{_escape(_display_time(journal_time))}</td><td>{_escape(_display_time(experts_time))}</td>'
             f'<td>{errors or 0}</td></tr>'
         )
+    alert_rows = connection.execute(
+        "SELECT host_id,alert_type,state,detail,changed_utc,last_sent_utc,last_error "
+        "FROM alerts ORDER BY CASE state WHEN 'active' THEN 0 WHEN 'recovering' THEN 1 ELSE 2 END, "
+        "changed_utc DESC LIMIT 30"
+    ).fetchall()
+    alerts_html = "".join(
+        '<tr>'
+        f'<td>{_escape(host_id)}</td><td>{_escape(alert_type.replace("_", " "))}</td>'
+        f'<td><span class="badge {"bad" if state == "active" else "warn" if state == "recovering" else "good"}">{_escape(state)}</span></td>'
+        f'<td>{_escape(detail)}</td><td>{_escape(_display_time(changed))}</td>'
+        f'<td>{_escape(_display_time(sent))}'
+        + (f'<small>Delivery error: {_escape(error)}</small>' if error else '')
+        + '</td></tr>'
+        for host_id, alert_type, state, detail, changed, sent, error in alert_rows
+    )
     body = (
         '<h1>Collector and terminal folders</h1>'
         '<p class="muted">Receive times are UTC. Quiet logs do not imply that MT5 is stopped.</p>'
@@ -173,6 +188,10 @@ def render_dashboard(connection: sqlite3.Connection, now: datetime | None = None
         + '<div class="table-wrap"><table><thead><tr><th>Data folder</th><th>Host</th><th>Folder state</th><th>MT5 process</th>'
         '<th>Last Journal</th><th>Last Experts</th><th>Error text, 24h</th></tr></thead><tbody>'
         + ("".join(rows) if rows else '<tr><td colspan="7">No terminals received yet.</td></tr>')
+        + '</tbody></table></div>'
+        + '<h2>Alerts</h2><div class="table-wrap"><table><thead><tr><th>Host</th><th>Type</th><th>State</th>'
+        '<th>Detail</th><th>Changed</th><th>Last sent</th></tr></thead><tbody>'
+        + (alerts_html if alerts_html else '<tr><td colspan="6">No alerts yet.</td></tr>')
         + '</tbody></table></div>'
     )
     return _page("Status", body)

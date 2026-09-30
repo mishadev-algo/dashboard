@@ -54,6 +54,19 @@ def open_database(path: Path) -> sqlite3.Connection:
             pending_count INTEGER NOT NULL,
             payload_json TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS alerts (
+            host_id TEXT NOT NULL,
+            alert_type TEXT NOT NULL,
+            target TEXT NOT NULL,
+            state TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            changed_utc TEXT NOT NULL,
+            last_attempt_utc TEXT,
+            last_sent_utc TEXT,
+            active_notified INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            PRIMARY KEY (host_id, alert_type, target)
+        );
         CREATE INDEX IF NOT EXISTS idx_log_events_received ON log_events(received_utc DESC);
         CREATE INDEX IF NOT EXISTS idx_log_events_terminal_received
             ON log_events(host_id, terminal_id, received_utc DESC);
