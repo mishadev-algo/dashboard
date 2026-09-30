@@ -1,9 +1,9 @@
 # Dashboard alpha — project status
 
-**Updated:** 2026-09-30 (VPS account/inventory path mismatch reported)
-**Phase:** Collector, ingest, status/log page, persistent terminal inventory, Telegram health alerts, read-only broker/account worker, alpha audit, and online SQLite backup are implemented. The operator reported that the Git-deployed launcher and account page worked after correcting account configuration, then a later launcher attempt stopped because an account target was absent from `inventory.json`'s `expected` list. The current running state is unconfirmed. Real midnight rollover remains deferred; two-account PnL reconciliation, audit, backup restore, and HTTPS proxy have not yet been evidenced on the VPS.
-**Active ticket:** Align the intended active account folders between `accounts.json` and the inventory `expected` list, then rerun the launcher. Owner: VPS operator for deciding which terminals should currently run; Codex for startup diagnosis.
-**Current milestone acceptance:** The account snapshots were reported working earlier. The immediate check is a successful launcher start with all account targets in `expected`, followed by matching position tickets and daily PnL for two accounts, `pending=0`, and complete expected-terminal coverage. The later release gate still requires the deferred rollover trial and secure deployment verification.
+**Updated:** 2026-09-30 (operator reports inventory mismatch fixed; alpha verification prioritized)
+**Phase:** Collector, ingest, status/log page, persistent terminal inventory, Telegram health alerts, read-only broker/account worker, alpha audit, and online SQLite backup are implemented. The operator reports that the Git-deployed launcher and account page work and that the later account/inventory mismatch has been fixed. Current collector counts, account snapshot freshness, and coverage were not supplied for independent verification. Real midnight rollover remains deferred; two-account PnL reconciliation, backup restore, and HTTPS proxy have not yet been evidenced on the VPS.
+**Active ticket:** Capture a live alpha audit and reconcile positions and one day's realized PnL for two accounts against MT5 History. Owner: VPS operator for audit output and MT5 comparison; Codex for investigating findings or discrepancies.
+**Current milestone acceptance:** Audit shows `pending=0`, no missing or unknown expected folders, both streams for active terminals, and fresh account snapshots; two accounts' position tickets and selected-day PnL match MT5 History. The later release gate still requires the deferred rollover trial and secure deployment verification.
 
 ## Verified so far
 
@@ -32,6 +32,7 @@
 - A subsequent VPS launcher attempt passed token validation and stopped with `invalid day_timezone: UTC+3`. The account worker uses Python `ZoneInfo` for history-day boundaries. Local zoneinfo checks confirm `Etc/GMT-3` stays at UTC+3 in January and July 2026, while `Europe/Kyiv` changes from UTC+2 to UTC+3. The correct value depends on the MT5 History day convention; startup had not yet succeeded at that point.
 - The next VPS launch reached the account worker, and the server returned HTTP 200 for `/v1/snapshot`. The worker reported `account_mismatch` for folder `E4CC92B0E363A724100A202E316CB32A`, so the server correctly withheld account data. After correcting the expected login/server in `accounts.json` and restarting, the operator reported "everything is working." This is evidence of reported operational success, not an independently supplied snapshot or two-account MT5 History reconciliation.
 - A later VPS attempt reported `every account target must appear in inventory expected`. The launcher stops before child processes start when an account folder is absent from the expected inventory; the changed folder and the current VPS configuration were not supplied. The launcher error now names missing paths to guide correction.
+- The operator then said the inventory mismatch was fixed. Treat startup and account display as operator-reported working; collect audit output and two-account MT5 comparisons before marking the alpha acceptance checks independently verified.
 - See [collector usage](docs/collector.md).
 
 ## Prioritized backlog
@@ -59,7 +60,11 @@
 
 ## Next concrete action
 
-Compare the account `data_path` values with the inventory `expected` list on the VPS. Put every intended running account terminal under `expected`; remove an account target if its folder is archived or no longer monitored. Rerun the launcher. Then compare open positions and a selected day's PnL for two accounts against MT5 History and run `server.audit`. The real midnight rollover trial remains postponed at the user's request. Host/domain choice, HTTPS validation, PostgreSQL migration, and full alpha release verification remain open.
+1. Run `py -3.13 -m server.audit --db central.db --output alpha-audit.json` while the launcher is running; resolve any missing/unknown folders, pending lines, stale account snapshots, or absent log streams. Owner: VPS operator, with Codex to diagnose findings. Acceptance: live report shows complete expected coverage, `pending=0`, and fresh snapshots.
+2. Compare open positions and a selected day's realized PnL for two accounts against MT5 History in the configured day zones. Owner: VPS operator. Acceptance: tickets, account attribution, and PnL match; unmapped trades remain visibly unmapped.
+3. Capture controlled health/recovery evidence for broker disconnect and Telegram alerts, and retain the previously reported API outage/replay evidence or repeat that check if it cannot be produced. Owner: VPS operator, with Codex to investigate differences. Acceptance: one failure and recovery notification and replayed logs without duplicates.
+4. Verify an online backup can be restored into a separate test database and arrange unattended service restart after a VPS reboot. Owner: Codex for procedure/tooling, VPS operator for the Windows check. Acceptance: restored database passes integrity and the services return after reboot.
+5. Choose the central host/domain and complete the secure deployment path: HTTPS, authenticated dashboard access, per-host tokens, and the planned PostgreSQL migration before remote alpha release. Owner: Codex for implementation; VPS operator for host/domain and deployment validation. Acceptance: external HTTPS/auth and collector upload checks pass. The real midnight rollover trial remains postponed at the user's request.
 
 ## PM check-in format
 
