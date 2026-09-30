@@ -59,7 +59,10 @@ def load_targets(path: Path) -> tuple[AccountTarget, ...]:
         try:
             ZoneInfo(day_timezone)
         except (TypeError, ZoneInfoNotFoundError):
-            raise ValueError(f"invalid day_timezone: {day_timezone}") from None
+            raise ValueError(
+                f"invalid day_timezone: {day_timezone}; use an IANA name "
+                "(fixed UTC+3 is Etc/GMT-3)"
+            ) from None
         if not isinstance(strategies, dict) or any(
             not str(key).isdigit() or not isinstance(value, str) or not value.strip()
             for key, value in strategies.items()

@@ -1,8 +1,8 @@
 # Dashboard alpha — project status
 
-**Updated:** 2026-09-30 (VPS startup token mismatch diagnosed)
-**Phase:** Collector, ingest, status/log page, persistent terminal inventory, Telegram health alerts, local read-only broker/account prototype, alpha audit, and online SQLite backup. The Git-deployed one-console launcher reached configuration validation on the VPS, then stopped on a collector-token mismatch before starting child processes. Real midnight rollover remains deferred. Broker/account data, audit, backup, and HTTPS proxy have not yet been verified on the VPS.
-**Active ticket:** Correct the same-window collector token, confirm real expected/archived paths in the VPS inventory, then start the dashboard with the account worker when `accounts.json` is ready. Owner: Codex for startup tooling and diagnosis; VPS operator for classifying terminal folders, local secrets, account mapping, and startup.
+**Updated:** 2026-09-30 (VPS account timezone validation diagnosed)
+**Phase:** Collector, ingest, status/log page, persistent terminal inventory, Telegram health alerts, local read-only broker/account prototype, alpha audit, and online SQLite backup. The Git-deployed one-console launcher now passes host/token validation on the VPS, then stops on an invalid `day_timezone` in `accounts.json` before starting child processes. Real midnight rollover remains deferred. Broker/account data, audit, backup, and HTTPS proxy have not yet been verified on the VPS.
+**Active ticket:** Replace `UTC+3` with the intended IANA day zone in the VPS account config, confirm real expected/archived paths in the inventory, then start the dashboard. Owner: Codex for startup tooling and diagnosis; VPS operator for local configuration and startup.
 **Current milestone acceptance:** Server, collector, alerts, and optional account worker start with the same host ID/token and databases; collector reports expected folders and `pending=0`; the dashboard displays fresh terminal and account states. The later release gate still requires live trial and secure deployment verification.
 
 ## Verified so far
@@ -29,6 +29,7 @@
 - A read-only `server.audit` command now reports database evidence for the alpha trial and explicitly lists checks needing live observation. A `server.backup` command uses SQLite's online backup API, checks integrity, and writes a new backup file. Local tests verify report findings and a backup that remains intact after the source changes; the full suite passes 36 tests. A Caddy HTTPS/authentication template and release runbook are drafted from official Caddy documentation. The ignored `dashboard-alpha-prep.zip` package passes an integrity check. Caddy is not installed locally, and no live domain or host has been supplied, so the proxy template is not validated or deployed.
 - A local `server.run_all` launcher now validates the existing databases, expected-terminal inventory, host ID, and token match before starting server, collector, alerts, and optional account worker as separate child processes in one console. The startup guide gives an ordered Git pull and PowerShell procedure. Three new local configuration tests pass, bringing the suite to 39; Windows process supervision has not yet been exercised on the VPS. `accounts.json` is not auto-populated: expected account login/server must be mapped once on the VPS so the worker can reject a mismatched account.
 - On the VPS, the operator ran `server.run_all` and received `DASHBOARD_COLLECTOR_TOKEN must match the server token for this host`. The launcher reached host/token validation, but no child process started. The startup guide gives a same-window command to derive the matching collector token from the configured host-token map without printing it; launcher errors now distinguish missing from mismatched values. Successful restart remains unverified.
+- A subsequent VPS launcher attempt passed token validation and stopped with `invalid day_timezone: UTC+3`. The account worker uses Python `ZoneInfo` for history-day boundaries. Local zoneinfo checks confirm `Etc/GMT-3` stays at UTC+3 in January and July 2026, while `Europe/Kyiv` changes from UTC+2 to UTC+3. The correct value depends on the MT5 History day convention; the operator must choose it. Startup remains unverified.
 - See [collector usage](docs/collector.md).
 
 ## Prioritized backlog
@@ -56,7 +57,7 @@
 
 ## Next concrete action
 
-Follow [VPS_START.md](docs/VPS_START.md): set the collector token from the existing `DASHBOARD_HOST_TOKENS` map in the launcher PowerShell window, then rerun `server.run_all` with the existing collector database. Confirm real paths in `inventory.json` and include `--accounts accounts.json` only after its mappings are filled. Check the combined output and `/accounts`, then compare two accounts against MT5. The real midnight rollover trial remains postponed at the user's request. Host/domain choice, HTTPS validation, PostgreSQL migration, and full alpha release verification remain open.
+Follow [VPS_START.md](docs/VPS_START.md): change `day_timezone` in `accounts.json` to `Etc/GMT-3` if MT5 History uses fixed UTC+3, or to the relevant regional IANA zone if it follows daylight saving; then rerun `server.run_all`. Confirm real paths in `inventory.json`, inspect the combined output and `/accounts`, then compare two accounts against MT5. The real midnight rollover trial remains postponed at the user's request. Host/domain choice, HTTPS validation, PostgreSQL migration, and full alpha release verification remain open.
 
 ## PM check-in format
 
