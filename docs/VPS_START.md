@@ -12,9 +12,20 @@ py -3.13 --version
 Get-ChildItem *.db
 Test-Path .\inventory.json
 Test-Path .\accounts.json
+if (Test-Path .\inventory.json) { Get-Content .\inventory.json }
 ```
 
-The database list tells you whether your **existing** collector database is `collector.db` or `collector-central.db`. Use that exact name below. Do not create a new collector DB just to use the launcher; its existing cursors and pending upload queue should be preserved. `inventory.json` should return `True`.
+The database list tells you whether your **existing** collector database is `collector.db` or `collector-central.db`. Use that exact name below. Do not create a new collector DB just to use the launcher; its existing cursors and pending upload queue should be preserved. `inventory.json` must contain real VPS paths; merely returning `True` from `Test-Path` does not mean the example has been configured.
+
+If `inventory.json` is missing or still contains `ACTIVE_FOLDER_1` and other example names, list the real folders already seen by the collector. Replace `collector-central.db` with your existing collector DB filename if different:
+
+```powershell
+py -3.13 -c "import sqlite3; c=sqlite3.connect('collector-central.db'); print(*[r[0] for r in c.execute('SELECT DISTINCT data_path FROM terminals ORDER BY data_path')], sep='\n'); c.close()"
+Copy-Item .\docs\inventory.example.json .\inventory.json
+notepad .\inventory.json
+```
+
+Put folders whose MT5 terminals should run in `expected`; put old folders you want to keep visible in `archived`. Compare the list with the currently open MT5 terminals before classifying. The collector discovers folders automatically, but it cannot decide which ones you intend to keep running. Include any portable/custom terminal paths that standard discovery misses. `inventory.json` stays on the VPS and is ignored by Git.
 
 `accounts.json` is **not created or filled automatically**. The log collector discovers terminal folders, but it cannot establish which account should be trusted in each terminal. The account worker needs the exact expected login and broker server to reject a wrong account or a terminal that switched accounts. The file is ignored by Git and must be created once on the VPS. If it is missing, copy the example and edit every placeholder before starting the account worker:
 
