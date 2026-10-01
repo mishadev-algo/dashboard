@@ -11,6 +11,7 @@ from pathlib import Path
 from server.audit import build_report
 from server.backup import create_backup
 from server.ingest import open_database
+from server.restore_check import check_restore
 
 
 class ReleaseToolsTest(unittest.TestCase):
@@ -92,10 +93,22 @@ class ReleaseToolsTest(unittest.TestCase):
         with closing(sqlite3.connect(backup)) as copied:
             self.assertEqual(copied.execute("PRAGMA integrity_check").fetchone(), ("ok",))
             self.assertEqual(copied.execute("SELECT COUNT(*) FROM log_events").fetchone()[0], 2)
+        restored = check_restore(backup, self.root / "restore-scratch")
+        self.assertEqual(restored["restore_integrity"], "ok")
+        self.assertEqual(restored["counts"]["log_events"], 2)
+        self.assertFalse(list((self.root / "restore-scratch").iterdir()))
         with self.connection:
             self.connection.execute("DELETE FROM log_events")
         with closing(sqlite3.connect(backup)) as copied:
             self.assertEqual(copied.execute("SELECT COUNT(*) FROM log_events").fetchone()[0], 2)
+
+    def test_restore_check_rejects_non_database_and_cleans_scratch(self) -> None:
+        invalid = self.root / "invalid.sqlite3"
+        invalid.write_text("not a SQLite database", encoding="utf-8")
+        scratch = self.root / "restore-scratch"
+        with self.assertRaises(sqlite3.DatabaseError):
+            check_restore(invalid, scratch)
+        self.assertFalse(list(scratch.iterdir()))
 
 
 if __name__ == "__main__":

@@ -12,3 +12,5 @@ accounts.json
 backups/
 alpha-audit*.json
 Caddyfile
+.dashboard-start.local.json
+run-logs/

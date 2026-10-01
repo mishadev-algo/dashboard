@@ -20,11 +20,39 @@ While the prototype still uses SQLite, create an online backup with Python's `sq
 py -3.13 -m server.backup --db central.db --directory backups
 ```
 
-Keep the backup directory outside the web server's served paths. Copy backups to a separate storage location and test a restore before release. To restore, stop the ingest and alert processes, preserve the current `central.db`, copy the chosen backup to `central.db`, check it, and restart the processes. Do not replace a live database file in place. The check is:
+The restore check uses the newest backup as input, restores it to a temporary separate database, runs `PRAGMA integrity_check` and the dashboard audit queries, prints table counts, then removes the temporary copy. It does not modify `central.db`:
 
 ```powershell
-py -3.13 -c "import sqlite3; c=sqlite3.connect('central.db'); print(c.execute('PRAGMA integrity_check').fetchone()[0]); c.close()"
+$backup = Get-ChildItem .\backups\central-backup-*.sqlite3 | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+py -3.13 -m server.restore_check --backup $backup.FullName
 ```
+
+Keep the backup directory outside the web server's served paths and copy backups to a separate storage location. The restore check proves the file can be restored and queried; its audit findings describe the data at check time and can include stale heartbeats in an older backup. For a real recovery, stop the launcher, preserve the current `central.db`, copy a checked backup to `central.db`, then start the launcher. Never replace the live database in place.
+
+## Restart after a VPS reboot
+
+The one-console launcher currently needs an open PowerShell window. [vps_task.ps1](../scripts/vps_task.ps1) prepares a Windows Task Scheduler job that runs the same launcher at the MT5 Windows user's **logon**. Logon is the chosen trigger because the worker attaches to that user's running MT5 terminals. A reboot without that user logging on does not start this job. The task must be checked on the VPS before relying on it.
+
+In the existing launcher PowerShell window, press Ctrl+C. The four environment variables remain in that window. Pull the current Git revision, then save the startup settings with the **existing** collector database filename and any previously used `-Root` or `-Terminal` paths:
+
+```powershell
+Set-Location C:\dashboard
+git pull --ff-only origin main
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\vps_task.ps1 -Mode Save -CollectorDb collector-central.db
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\vps_task.ps1 -Mode Install
+Start-ScheduledTask -TaskName MT5Dashboard
+```
+
+`Save` uses the four `DASHBOARD_*` variables already set in that window, finds the Python 3.13 executable, and writes `.dashboard-start.local.json`. The secret values in that ignored file are encrypted for the current Windows user with [DPAPI](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/convertfrom-securestring); run the scheduled task as that same user. `Install` registers an [interactive logon task](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasktrigger), sets an [unlimited execution time](https://learn.microsoft.com/en-us/windows/win32/taskschd/tasksettings-executiontimelimit), avoids parallel copies, and allows three restarts after a failure. It does not start the task until `Start-ScheduledTask` is run. The task writes a new ignored file in `run-logs` each time it starts. To inspect it:
+
+```powershell
+Get-ScheduledTask -TaskName MT5Dashboard | Select-Object TaskName,State
+Get-ScheduledTaskInfo -TaskName MT5Dashboard | Select-Object LastRunTime,LastTaskResult
+$log = Get-ChildItem .\run-logs\dashboard-*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+Get-Content $log.FullName -Tail 50
+```
+
+Confirm `started server`, `started collector`, `started alerts`, `started accounts`, and a collector line with `pending=0`. Check `/` and `/accounts`, then verify one clean return after a VPS reboot and user logon. If the task fails, inspect its log and Task Scheduler's last result before starting a manual launcher. The task registration and DPAPI reload path were prepared locally but have not been run on the Windows VPS.
 
 ## HTTPS and page authentication
 

@@ -117,7 +117,7 @@ Within a minute, the combined output should show `started server`, `started coll
 - `http://127.0.0.1:8765/logs` — Journal and Experts lines
 - `http://127.0.0.1:8765/accounts` — positions and realized PnL, once the account worker has made a complete snapshot
 
-The one-console launcher is for an attended alpha trial. Closing that PowerShell window stops the services. The [release runbook](release.md) covers the one-off audit, backup, and later HTTPS setup; a Windows service or scheduled task is still needed for unattended startup after a reboot.
+The one-console launcher is for an attended alpha trial. Closing that PowerShell window stops the services. The [release runbook](release.md) covers the one-off audit, backup restore check, optional logon task, and later HTTPS setup. The logon task needs a VPS check before relying on it after reboot.
 
 To create an audit after the workers have reported, use a temporary second PowerShell window:
 
