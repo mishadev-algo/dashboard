@@ -38,8 +38,8 @@ In the existing launcher PowerShell window, press Ctrl+C. The four environment v
 ```powershell
 Set-Location C:\dashboard
 git pull --ff-only origin main
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\vps_task.ps1 -Mode Save -CollectorDb collector-central.db
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\vps_task.ps1 -Mode Install
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\vps_task.ps1 -Mode Save -ProjectDir C:\dashboard -CollectorDb collector-central.db
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\vps_task.ps1 -Mode Install -ProjectDir C:\dashboard
 Start-ScheduledTask -TaskName MT5Dashboard
 ```
 

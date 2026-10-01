@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('Save', 'Install', 'Run')]
     [string]$Mode,
-    [string]$ProjectDir = (Split-Path $PSScriptRoot -Parent),
+    [string]$ProjectDir,
     [string]$CollectorDb = 'collector-central.db',
     [string]$Inventory = 'inventory.json',
     [string]$Accounts = 'accounts.json',
@@ -13,6 +13,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'This script requires Windows and the current MT5 user.' }
+$scriptPath = $MyInvocation.MyCommand.Path
+if (-not $scriptPath) { $scriptPath = $PSCommandPath }
+if (-not $scriptPath) { throw 'Cannot determine script path; run with -File.' }
+if (-not $ProjectDir) { $ProjectDir = Split-Path -Parent (Split-Path -Parent $scriptPath) }
 $ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
 $configPath = Join-Path $ProjectDir '.dashboard-start.local.json'
 $secretNames = @(
@@ -67,7 +71,7 @@ if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
 if ($Mode -eq 'Install') {
     $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -Mode Run -ProjectDir "' + $ProjectDir + '"'
+    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $scriptPath + '" -Mode Run -ProjectDir "' + $ProjectDir + '"'
     $action = New-ScheduledTaskAction -Execute $powershell -Argument $arguments -WorkingDirectory $ProjectDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
     $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited

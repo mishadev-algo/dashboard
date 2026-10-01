@@ -39,6 +39,7 @@
 - The operator then replied "done" after the account mismatch diagnosis and subsequently supplied `"findings": []` from a fresh audit. The audit's reported database health findings are clear, including the earlier account mismatch finding. Only the findings excerpt was supplied, so current host/account detail and MT5 History values have not been independently compared.
 - After the request to compare both accounts' open positions and one day's realized PnL with MT5 History, the operator replied "everything is goos." Record the comparison as operator-reported good; the selected day, ticket values, and PnL totals were not supplied for independent reconciliation.
 - The operator supplied the VPS restore-check result for `central-backup-20261001T075008Z-5a073d5b.sqlite3`: `restore_integrity=ok`, `audit_findings_at_restore_time=[]`, and counts of 1 host, 4 terminals, 1,844 log events, 3 account rows, 3 position rows, and 75 deal rows. This demonstrates that this backup can be restored and queried; a live database replacement was not performed.
+- The first VPS logon-task setup attempt failed before task registration because the PowerShell script evaluated `$PSScriptRoot` as an empty parameter default. The script now resolves its own path after parameter binding; the release commands also pass `-ProjectDir C:\dashboard` explicitly. Task registration and restart are still unverified on Windows.
 - See [collector usage](docs/collector.md).
 
 ## Prioritized backlog
