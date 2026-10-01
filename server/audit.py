@@ -115,7 +115,9 @@ def build_report(connection: sqlite3.Connection, now: datetime | None = None) ->
             if path in expected and online:
                 if process_state == "stopped":
                     report["findings"].append(f"{host_id}: MT5 process stopped: {path}")
-                if process_state == "running" and probe_state != "ok":
+                if process_state == "running" and probe_state == "account_mismatch":
+                    report["findings"].append(f"{host_id}: MT5 account does not match configured login/server: {path}")
+                elif process_state == "running" and probe_state != "ok":
                     report["findings"].append(f"{host_id}: broker/account probe unavailable: {path}")
                 if broker is False:
                     report["findings"].append(f"{host_id}: broker disconnected: {path}")

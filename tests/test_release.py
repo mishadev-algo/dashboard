@@ -86,6 +86,16 @@ class ReleaseToolsTest(unittest.TestCase):
         report = build_report(self.connection, self.now + timedelta(seconds=1))
         self.assertFalse(report["accounts"][0]["snapshot_fresh"])
 
+    def test_audit_names_account_mismatch(self) -> None:
+        self.seed()
+        with self.connection:
+            self.connection.execute("UPDATE terminal_status SET status_json=?",
+                                    (json.dumps({"state": "account_mismatch"}),))
+        report = build_report(self.connection, self.now + timedelta(seconds=1))
+        self.assertTrue(any("MT5 account does not match configured login/server" in item
+                            for item in report["findings"]))
+        self.assertFalse(any("probe unavailable" in item for item in report["findings"]))
+
     def test_online_backup_is_consistent_and_independent(self) -> None:
         self.seed()
         backup = create_backup(self.db_path, self.root / "backups", self.now)
