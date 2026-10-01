@@ -136,6 +136,7 @@ Set-Location -LiteralPath $ProjectDir
 $logDirectory = Join-Path $ProjectDir 'run-logs'
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 $logFile = Join-Path $logDirectory ("dashboard-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
-"Starting dashboard at $(Get-Date -Format o)" | Out-File -FilePath $logFile -Encoding UTF8
+# Windows PowerShell 5.1 writes *>> redirection as UTF-16LE by default.
+"Starting dashboard at $(Get-Date -Format o)" | Out-File -FilePath $logFile -Encoding Unicode
 & ([string]$config.python) @arguments *>> $logFile
 exit $LASTEXITCODE
