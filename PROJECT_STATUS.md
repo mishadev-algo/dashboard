@@ -1,5 +1,7 @@
 # Dashboard alpha — project status
 
+For a short VPS continuation handoff, see [VPS_HANDOFF.md](VPS_HANDOFF.md).
+
 **Updated:** 2026-10-01 (Windows task manually started the VPS services)
 **Phase:** Collector, ingest, status/log page, persistent terminal inventory, Telegram health alerts, read-only broker/account worker, alpha audit, online SQLite backup, and a separate restore check are implemented. The Windows logon task has been registered and manually started the services on the VPS. The October 1 07:10 UTC VPS audit confirmed a fresh collector, three expected running terminals with both log streams, one stopped archived terminal, no missing or unknown folders, and zero pending uploads. Two accounts had fresh complete snapshots with broker connection and AutoTrading enabled. After the account mismatch correction, the operator supplied a fresh audit excerpt with no findings; the full report was not supplied. The operator reports the subsequent two-account MT5 comparison is good, but no comparison values were supplied. A VPS backup restored successfully with integrity `ok` and no audit findings. Real midnight rollover remains deferred; automatic restart after reboot and HTTPS proxy have not yet been evidenced.
 **Active ticket:** Verify the prepared Windows logon task after a real VPS reboot and user logon. Owner: VPS operator for the Windows check; Codex for investigating failures.
