@@ -6,6 +6,7 @@ param(
     [string]$CollectorDb = 'collector-central.db',
     [string]$Inventory = 'inventory.json',
     [string]$Accounts = 'accounts.json',
+    [string]$PythonExe,
     [string[]]$Root = @(),
     [string[]]$Terminal = @(),
     [string]$TaskName = 'MT5Dashboard'
@@ -38,16 +39,24 @@ if ($Mode -eq 'Save') {
             throw "Required file is missing: $candidate"
         }
     }
-    if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
-        throw 'Python launcher py was not found. Install Python 3.13 with the launcher, or check PATH.'
+    if ($PythonExe) {
+        $python = (Resolve-Path -LiteralPath $PythonExe).Path
+    } else {
+        if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
+            throw 'Python launcher py was not found. Install Python 3.13 with the launcher, or pass -PythonExe.'
+        }
+        $pythonOutput = & py -3.13 -c 'import sys; print(sys.executable)'
+        if ($LASTEXITCODE -ne 0 -or -not $pythonOutput) {
+            throw 'Python 3.13 is unavailable through py. Run py -0p or pass -PythonExe.'
+        }
+        $python = ([string]($pythonOutput | Select-Object -First 1)).Trim()
     }
-    $pythonOutput = & py -3.13 -c 'import sys; print(sys.executable)'
-    if ($LASTEXITCODE -ne 0 -or -not $pythonOutput) {
-        throw 'Python 3.13 is unavailable through py. Run py -0p to see installed versions.'
-    }
-    $python = ([string]($pythonOutput | Select-Object -First 1)).Trim()
     if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
-        throw "Python 3.13 reported an executable that does not exist: $python"
+        throw "Python executable does not exist: $python"
+    }
+    $pythonVersion = & $python -c 'import sys; print("{}.{}".format(sys.version_info.major, sys.version_info.minor))'
+    if ($LASTEXITCODE -ne 0 -or $pythonVersion -ne '3.13') {
+        throw "Expected Python 3.13 at $python; found $pythonVersion"
     }
     $encrypted = @{}
     foreach ($name in $secretNames) {

@@ -47,6 +47,8 @@ Start-ScheduledTask -TaskName MT5Dashboard
 
 If `Save` fails, stop before `Install` or `Start-ScheduledTask`: an existing startup-settings file may contain older values. Run `py -3.13 -c "import sys; print(sys.executable)"` and `py -0p` on that VPS to check the Python launcher and installed versions. `Install` checks that the saved executable still exists, but `Save` must succeed with the current settings before starting the task.
 
+If the launcher lists Python 3.13 but automatic detection fails, pass the exact executable to `Save` with `-PythonExe 'C:\path\to\Python313\python.exe'`. The helper verifies that it runs Python 3.13 before saving the settings.
+
 ```powershell
 Get-ScheduledTask -TaskName MT5Dashboard | Select-Object TaskName,State
 Get-ScheduledTaskInfo -TaskName MT5Dashboard | Select-Object LastRunTime,LastTaskResult
