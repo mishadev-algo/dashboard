@@ -45,6 +45,8 @@ Start-ScheduledTask -TaskName MT5Dashboard
 
 `Save` uses the four `DASHBOARD_*` variables already set in that window, finds the Python 3.13 executable, and writes `.dashboard-start.local.json`. The secret values in that ignored file are encrypted for the current Windows user with [DPAPI](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/convertfrom-securestring); run the scheduled task as that same user. `Install` registers an [interactive logon task](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtasktrigger), sets an [unlimited execution time](https://learn.microsoft.com/en-us/windows/win32/taskschd/tasksettings-executiontimelimit), avoids parallel copies, and allows three restarts after a failure. It does not start the task until `Start-ScheduledTask` is run. The task writes a new ignored file in `run-logs` each time it starts. To inspect it:
 
+If `Save` fails, stop before `Install` or `Start-ScheduledTask`: an existing startup-settings file may contain older values. Run `py -3.13 -c "import sys; print(sys.executable)"` and `py -0p` on that VPS to check the Python launcher and installed versions. `Install` checks that the saved executable still exists, but `Save` must succeed with the current settings before starting the task.
+
 ```powershell
 Get-ScheduledTask -TaskName MT5Dashboard | Select-Object TaskName,State
 Get-ScheduledTaskInfo -TaskName MT5Dashboard | Select-Object LastRunTime,LastTaskResult

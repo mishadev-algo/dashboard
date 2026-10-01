@@ -40,6 +40,7 @@
 - After the request to compare both accounts' open positions and one day's realized PnL with MT5 History, the operator replied "everything is goos." Record the comparison as operator-reported good; the selected day, ticket values, and PnL totals were not supplied for independent reconciliation.
 - The operator supplied the VPS restore-check result for `central-backup-20261001T075008Z-5a073d5b.sqlite3`: `restore_integrity=ok`, `audit_findings_at_restore_time=[]`, and counts of 1 host, 4 terminals, 1,844 log events, 3 account rows, 3 position rows, and 75 deal rows. This demonstrates that this backup can be restored and queried; a live database replacement was not performed.
 - The first VPS logon-task setup attempt failed before task registration because the PowerShell script evaluated `$PSScriptRoot` as an empty parameter default. The script now resolves its own path after parameter binding; the release commands also pass `-ProjectDir C:\dashboard` explicitly. Task registration and restart are still unverified on Windows.
+- The next task setup attempt reached `Save` but failed its Python 3.13 executable check. `Install` nevertheless registered `MT5Dashboard`, apparently using a previously saved settings file; no task run evidence was supplied. The helper now reports whether `py` or version 3.13 is unavailable and checks the saved Python path before installation. Do not start the task until `Save` succeeds on that VPS.
 - See [collector usage](docs/collector.md).
 
 ## Prioritized backlog

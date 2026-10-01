@@ -38,9 +38,16 @@ if ($Mode -eq 'Save') {
             throw "Required file is missing: $candidate"
         }
     }
-    $python = (& py -3.13 -c 'import sys; print(sys.executable)' | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $python -PathType Leaf)) {
-        throw 'Python 3.13 executable was not found'
+    if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
+        throw 'Python launcher py was not found. Install Python 3.13 with the launcher, or check PATH.'
+    }
+    $pythonOutput = & py -3.13 -c 'import sys; print(sys.executable)'
+    if ($LASTEXITCODE -ne 0 -or -not $pythonOutput) {
+        throw 'Python 3.13 is unavailable through py. Run py -0p to see installed versions.'
+    }
+    $python = ([string]($pythonOutput | Select-Object -First 1)).Trim()
+    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+        throw "Python 3.13 reported an executable that does not exist: $python"
     }
     $encrypted = @{}
     foreach ($name in $secretNames) {
@@ -67,6 +74,14 @@ if ($Mode -eq 'Save') {
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
     throw "Startup settings are missing: $configPath. Run -Mode Save first."
 }
+$config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($config.version -ne 1) { throw 'Unsupported startup settings version' }
+if ($config.user_sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+    throw 'Startup settings were encrypted for a different Windows user'
+}
+if (-not (Test-Path -LiteralPath ([string]$config.python) -PathType Leaf)) {
+    throw 'Saved Python executable is missing. Run -Mode Save again before installing or starting the task.'
+}
 
 if ($Mode -eq 'Install') {
     $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -84,11 +99,6 @@ if ($Mode -eq 'Install') {
     exit 0
 }
 
-$config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($config.version -ne 1) { throw 'Unsupported startup settings version' }
-if ($config.user_sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
-    throw 'Startup settings were encrypted for a different Windows user'
-}
 foreach ($name in $secretNames) {
     $property = $config.secrets.PSObject.Properties[$name]
     if (-not $property) { throw "Encrypted setting is missing: $name" }
