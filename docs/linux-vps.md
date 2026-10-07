@@ -102,7 +102,7 @@ sudo journalctl -u mt5-dashboard -n 80 --no-pager
 .\scripts\remote_host_task.ps1 -Mode Install
 ```
 
-Перед стартом новой задачи контролируемо остановите старую `MT5Dashboard`, сохранив её конфигурацию для отката. Не удаляйте `collector-central.db` (или фактический файл сборщика): в нём есть смещения файлов и очередь. Затем `Start-ScheduledTask -TaskName MT5CollectorRemote` и проверьте свежий `run-logs\remote-collector-*.log`. Держите одну активную точку приёма на хост. Новая задача, как и старая, запускается при интерактивном входе MT5 пользователя; после перезагрузки без входа она не стартует. Для новых Windows VPS без старой конфигурации используйте напрямую `collector.run_host` с отдельным токеном, как в [плане](central-vps.md#split-launchers-for-a-later-cutover).
+Перед стартом новой задачи контролируемо остановите старую `MT5Dashboard`, сохранив её конфигурацию для отката. Не удаляйте `collector-central.db` (или фактический файл сборщика): в нём есть смещения файлов и очередь. Затем `Start-ScheduledTask -TaskName MT5CollectorRemote` и проверьте свежий `run-logs\remote-collector-*.log`. Держите одну активную точку приёма на хост. Новая задача, как и старая, запускается при интерактивном входе MT5 пользователя; после перезагрузки без входа она не стартует. Для новых Windows VPS используйте [отдельную инструкцию агенту](connect-new-windows-agent.md).
 
 Проверьте `pending=0`, свежесть Journal/Experts и account snapshots, уведомления и строгий аудит. На Linux VPS аудит использует приватный файл службы:
 
