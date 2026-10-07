@@ -34,9 +34,7 @@ Copy-Item .\docs\accounts.example.json .\accounts.json
 notepad .\accounts.json
 ```
 
-Copy `data_path` from each active entry in `inventory.json`; read `login` and `server` from the corresponding MT5 terminal. `day_timezone` defaults to `UTC` if omitted. Use `Etc/GMT-3` for a fixed UTC+3 trading day, or `Europe/Kyiv` if the day follows Kyiv daylight saving time; the string `UTC+3` is invalid. Strategy names are optional; unknown magic numbers remain unmapped. See [the account setup](accounts.md) and [example](accounts.example.json). Do not use the example's placeholder account numbers.
-
-Every `data_path` in `accounts.json` must be present in the `expected` list of `inventory.json`. If the launcher reports a missing account target, compare the two files; add it to `expected` only if that terminal should currently run. Otherwise remove its account entry. Do not put an actively monitored account folder in `archived`.
+Copy `data_path` from each active entry in `inventory.json`; read `login` and `server` from the corresponding MT5 terminal. `day_timezone` defaults to `UTC` if omitted. Strategy names are optional; unknown magic numbers remain unmapped. See [the account setup](accounts.md) and [example](accounts.example.json). Do not use the example's placeholder account numbers.
 
 Install the package needed by the optional account worker:
 
@@ -86,17 +84,6 @@ $env:DASHBOARD_TELEGRAM_CHAT_ID = 'YOUR_EXISTING_CHAT_ID'
 
 If the central server accepts several VPS hosts, keep **all** of their host/token pairs in `DASHBOARD_HOST_TOKENS`. The entry for this VPS must match `DASHBOARD_COLLECTOR_TOKEN`.
 
-PowerShell environment variables are local to the current window. If the launcher says the collector token is missing or differs, use the existing server token map in the **same window** to set the matching collector token without displaying it. Replace the database filename if needed:
-
-```powershell
-$hostId = py -3.13 -c "import sqlite3,socket; from collector.core import resolve_host_id; c=sqlite3.connect('collector-central.db'); print(resolve_host_id(c,None,socket.gethostname())); c.close()"
-$tokenMap = $env:DASHBOARD_HOST_TOKENS | ConvertFrom-Json
-$env:DASHBOARD_COLLECTOR_TOKEN = $tokenMap.PSObject.Properties[$hostId].Value
-if (-not $env:DASHBOARD_COLLECTOR_TOKEN) { throw "No server token for host $hostId; check DASHBOARD_HOST_TOKENS" }
-```
-
-This uses the token already in `DASHBOARD_HOST_TOKENS`. If that map contains an example value, replace it with the real token before starting the launcher.
-
 ## 4. Start everything in one window
 
 Replace `collector-central.db` with your existing collector DB name if different:
@@ -104,6 +91,8 @@ Replace `collector-central.db` with your existing collector DB name if different
 ```powershell
 py -3.13 -m server.run_all --db central.db --collector-db collector-central.db --inventory inventory.json --accounts accounts.json
 ```
+
+
 
 The launcher starts the ingest server, log collector, Telegram alert worker, and account worker as **four separate processes in this one PowerShell window**. It checks the files, host ID, and tokens before starting, prefixes each process's output, and stops the group when you press Ctrl+C. If a process exits unexpectedly, it stops the others so you can see and fix the error. Leave this window open while the dashboard runs.
 
@@ -117,7 +106,7 @@ Within a minute, the combined output should show `started server`, `started coll
 - `http://127.0.0.1:8765/logs` — Journal and Experts lines
 - `http://127.0.0.1:8765/accounts` — positions and realized PnL, once the account worker has made a complete snapshot
 
-The one-console launcher is for an attended alpha trial. Closing that PowerShell window stops the services. The [release runbook](release.md) covers the one-off audit, backup restore check, optional logon task, and later HTTPS setup. The logon task needs a VPS check before relying on it after reboot.
+The one-console launcher is for an attended alpha trial. Closing that PowerShell window stops the services. The [release runbook](release.md) covers the one-off audit, backup, and later HTTPS setup; a Windows service or scheduled task is still needed for unattended startup after a reboot.
 
 To create an audit after the workers have reported, use a temporary second PowerShell window:
 
@@ -125,3 +114,11 @@ To create an audit after the workers have reported, use a temporary second Power
 Set-Location C:\dashboard
 py -3.13 -m server.audit --db central.db --output alpha-audit.json
 ```
+
+
+### ДЛЯ ЗАПУСКА!!! #########
+$launcher = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$runner = 'C:\dashboard\scripts\vps_task.ps1'
+Start-Process -FilePath $launcher `
+  -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$runner,'-Mode','Run','-ProjectDir','C:\dashboard') `
+  -WorkingDirectory 'C:\dashboard' -WindowStyle Hidden -PassThru

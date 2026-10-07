@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
-import ntpath
 import os
 import queue
 import signal
@@ -21,7 +19,9 @@ from typing import Mapping
 
 from collector.core import resolve_host_id
 from collector.inventory import load_inventory
-from collector.accounts import load_targets
+from collector.accounts import load_targets, validate_account_coverage
+from shared.config import host_tokens as load_host_tokens
+from shared.sqlite import open_readonly
 
 
 @dataclass(frozen=True)
@@ -41,28 +41,20 @@ def service_plan(args: argparse.Namespace, environ: Mapping[str, str]) -> tuple[
     inventory = load_inventory(args.inventory)
     if not inventory.expected:
         raise ValueError("inventory must list the expected running terminals")
-    with closing(sqlite3.connect(args.collector_db.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+    with closing(open_readonly(args.collector_db)) as connection:
         host_id = resolve_host_id(connection, args.host_id, socket.gethostname())
-    try:
-        host_tokens = json.loads(environ["DASHBOARD_HOST_TOKENS"])
-    except (KeyError, ValueError) as exc:
-        raise ValueError("set DASHBOARD_HOST_TOKENS to the existing host-to-token JSON map") from exc
-    if not isinstance(host_tokens, dict) or not isinstance(host_tokens.get(host_id), str):
+    tokens = load_host_tokens(environ)
+    if host_id not in tokens:
         raise ValueError(f"DASHBOARD_HOST_TOKENS has no token for collector host {host_id!r}")
     token = environ.get("DASHBOARD_COLLECTOR_TOKEN", "")
     if not token:
         raise ValueError("DASHBOARD_COLLECTOR_TOKEN is not set in this PowerShell window")
-    if token != host_tokens[host_id]:
+    if token != tokens[host_id]:
         raise ValueError(f"DASHBOARD_COLLECTOR_TOKEN differs from DASHBOARD_HOST_TOKENS for host {host_id!r}")
     if args.port < 1 or args.port > 65535:
         raise ValueError("port must be between 1 and 65535")
     if args.accounts:
-        targets = load_targets(args.accounts)
-        expected = {ntpath.normcase(ntpath.normpath(str(path))) for path in inventory.expected}
-        missing = [str(target.data_path) for target in targets
-                   if ntpath.normcase(ntpath.normpath(str(target.data_path))) not in expected]
-        if missing:
-            raise ValueError("account target(s) missing from inventory expected: " + ", ".join(missing))
+        validate_account_coverage(inventory.expected, load_targets(args.accounts))
     if not args.no_alerts and not all(environ.get(key) for key in (
         "DASHBOARD_TELEGRAM_BOT_TOKEN", "DASHBOARD_TELEGRAM_CHAT_ID",
     )):
@@ -144,8 +136,8 @@ def _stop_all(processes: list[tuple[str, subprocess.Popen]]) -> None:
             process.wait()
 
 
-def supervise(services: tuple[Service, ...], port: int, directory: Path) -> None:
-    if _port_is_open(port):
+def supervise(services: tuple[Service, ...], port: int | None, directory: Path) -> None:
+    if port is not None and _port_is_open(port):
         raise RuntimeError(f"port {port} is already in use; stop the old server first")
     processes: list[tuple[str, subprocess.Popen]] = []
     lines: queue.Queue[tuple[str, str]] = queue.Queue()
@@ -158,7 +150,7 @@ def supervise(services: tuple[Service, ...], port: int, directory: Path) -> None
             )
             processes.append((service.name, process))
             threading.Thread(target=_reader, args=(service.name, process.stdout, lines), daemon=True).start()
-            if service.name == "server":
+            if service.name == "server" and port is not None:
                 _wait_for_server(process, port)
             print(f"started {service.name} (PID {process.pid})", flush=True)
         print("All services started. Press Ctrl+C to stop them together.", flush=True)

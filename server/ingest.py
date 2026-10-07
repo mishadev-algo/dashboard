@@ -3,15 +3,24 @@ from __future__ import annotations
 import hmac
 import json
 import re
+import secrets
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
+from email import policy
+from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from collector.protocol import event_id
+from shared.sqlite import open_readonly
 from .snapshots import ensure_schema, store_snapshot
-from .web import render_accounts, render_dashboard, render_logs
+from .postgres import PostgresConnection
+from .web import render_accounts, render_dashboard, render_eas, render_logs
+from .portfolio import render_portfolio
+from .strategy import render_strategy
+from .backtest_lab import ensure_backtest_schema, import_backtest, render_backtest_lab
 
 
 MAX_BODY_BYTES = 4 * 1024 * 1024
@@ -75,7 +84,22 @@ def open_database(path: Path) -> sqlite3.Connection:
             ON collector_heartbeats(host_id, heartbeat_id DESC);
     """)
     ensure_schema(connection)
+    ensure_backtest_schema(connection)
     return connection
+
+
+def open_storage(db_path: Path | None, postgres_dsn: str | None = None):
+    if postgres_dsn is not None:
+        connection = PostgresConnection(postgres_dsn)
+        try:
+            connection.execute("SELECT 1 FROM hosts LIMIT 1")
+        except Exception:
+            connection.close()
+            raise
+        return connection
+    if db_path is None:
+        raise ValueError("SQLite database path or PostgreSQL configuration is required")
+    return open_database(db_path)
 
 
 def _valid_event(event: object, host_id: str) -> bool:
@@ -101,69 +125,79 @@ def ingest(connection: sqlite3.Connection, payload: object, authorized_host: str
     state = payload.get("heartbeat")
     if not isinstance(events, list) or len(events) > 500 or not all(_valid_event(event, authorized_host) for event in events):
         raise ValueError("invalid events")
-    if not isinstance(state, dict) or not isinstance(state.get("observed_at_utc"), str) or not state["observed_at_utc"]:
-        raise ValueError("invalid heartbeat")
-    if type(state.get("pending_count")) is not int or state["pending_count"] < 0:
-        raise ValueError("invalid pending_count")
-    if not isinstance(state.get("terminals"), list):
-        raise ValueError("invalid terminal coverage")
-    for name in ("missing", "unknown", "expected", "archived"):
-        paths = state.get(name, [])
-        if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+    if state is None and not events:
+        raise ValueError("heartbeat or events required")
+    if state is not None:
+        if not isinstance(state, dict) or not isinstance(state.get("observed_at_utc"), str) or not state["observed_at_utc"]:
+            raise ValueError("invalid heartbeat")
+        if type(state.get("pending_count")) is not int or state["pending_count"] < 0:
+            raise ValueError("invalid pending_count")
+        if not isinstance(state.get("terminals"), list):
             raise ValueError("invalid terminal coverage")
-    for terminal in state["terminals"]:
-        if not isinstance(terminal, dict) or not isinstance(terminal.get("terminal_id"), str) or not isinstance(terminal.get("data_path"), str):
-            raise ValueError("invalid terminal")
+        for name in ("missing", "unknown", "expected", "archived"):
+            paths = state.get(name, [])
+            if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+                raise ValueError("invalid terminal coverage")
+        for terminal in state["terminals"]:
+            if not isinstance(terminal, dict) or not isinstance(terminal.get("terminal_id"), str) or not isinstance(terminal.get("data_path"), str):
+                raise ValueError("invalid terminal")
     now = datetime.now(timezone.utc).isoformat()
     acknowledged = []
     stored = 0
     with connection:
-        connection.execute(
-            "INSERT INTO hosts VALUES (?, ?) ON CONFLICT(host_id) DO UPDATE SET last_heartbeat_utc=excluded.last_heartbeat_utc",
-            (authorized_host, now),
-        )
-        for terminal in state["terminals"]:
+        if state is not None:
             connection.execute(
-                "INSERT INTO terminals VALUES (?, ?, ?, ?) ON CONFLICT(host_id, terminal_id) "
-                "DO UPDATE SET data_path=excluded.data_path, last_seen_utc=excluded.last_seen_utc",
-                (authorized_host, terminal["terminal_id"], terminal["data_path"], now),
+                "INSERT INTO hosts VALUES (?, ?) ON CONFLICT(host_id) DO UPDATE SET last_heartbeat_utc=excluded.last_heartbeat_utc",
+                (authorized_host, now),
             )
+            for terminal in state["terminals"]:
+                connection.execute(
+                    "INSERT INTO terminals VALUES (?, ?, ?, ?) ON CONFLICT(host_id, terminal_id) "
+                    "DO UPDATE SET data_path=excluded.data_path, last_seen_utc=excluded.last_seen_utc",
+                    (authorized_host, terminal["terminal_id"], terminal["data_path"], now),
+                )
         for event in events:
             connection.execute(
                 "INSERT INTO terminals VALUES (?, ?, ?, ?) ON CONFLICT(host_id, terminal_id) "
                 "DO UPDATE SET data_path=excluded.data_path",
                 (authorized_host, event["terminal_id"], event["data_path"], now),
             )
-            existing = connection.execute(
-                "SELECT raw_line FROM log_events WHERE event_id=?", (event["event_id"],)
+            inserted = connection.execute(
+                "INSERT INTO log_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (event_id) DO NOTHING RETURNING event_id",
+                (event["event_id"], authorized_host, event["terminal_id"], event["stream"],
+                 event["file_name"], event["generation"], event["byte_offset"], event["raw_line"], now),
             ).fetchone()
-            if existing is not None:
-                if existing[0] != event["raw_line"]:
+            if inserted is None:
+                existing = connection.execute(
+                    "SELECT raw_line FROM log_events WHERE event_id=?", (event["event_id"],)
+                ).fetchone()
+                if existing is None or existing[0] != event["raw_line"]:
                     raise ValueError("event key conflicts with stored line")
             else:
-                connection.execute(
-                    "INSERT INTO log_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (event["event_id"], authorized_host, event["terminal_id"], event["stream"],
-                     event["file_name"], event["generation"], event["byte_offset"], event["raw_line"], now),
-                )
                 stored += 1
             acknowledged.append(event["event_id"])
-        connection.execute(
-            "INSERT INTO collector_heartbeats (host_id, received_utc, observed_at_utc, pending_count, payload_json) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (authorized_host, now, state["observed_at_utc"], state["pending_count"], json.dumps(state, ensure_ascii=False)),
-        )
+        if state is not None:
+            connection.execute(
+                "INSERT INTO collector_heartbeats (host_id, received_utc, observed_at_utc, pending_count, payload_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (authorized_host, now, state["observed_at_utc"], state["pending_count"], json.dumps(state, ensure_ascii=False)),
+            )
     return {"acknowledged": acknowledged, "received": len(events), "stored": stored}
 
 
 class IngestServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address: tuple[str, int], db_path: Path, host_tokens: dict[str, str]):
+    def __init__(self, address: tuple[str, int], db_path: Path | None, host_tokens: dict[str, str],
+                 postgres_dsn: str | None = None):
         super().__init__(address, IngestHandler)
         self.db_path = db_path
+        self.postgres_dsn = postgres_dsn
         self.host_tokens = host_tokens
-        connection = open_database(db_path)
+        self.csrf_token = secrets.token_urlsafe(32)
+        connection = open_storage(db_path, postgres_dsn)
+        ensure_backtest_schema(connection)
         connection.close()
 
 
@@ -189,15 +223,37 @@ class IngestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlsplit(self.path)
-        if parsed.path not in ("/", "/logs", "/accounts"):
+        postgres_dsn = getattr(self.server, "postgres_dsn", None)
+        if parsed.path == "/health":
+            try:
+                connection = (open_storage(None, postgres_dsn) if postgres_dsn is not None else
+                              open_readonly(self.server.db_path))
+                with closing(connection) as connection:
+                    connection.execute("SELECT 1 FROM hosts LIMIT 1").fetchone()
+            except Exception:
+                self._respond(503, {"status": "unavailable"})
+                return
+            self._respond(200, {"status": "ok"})
+            return
+        if parsed.path not in ("/", "/logs", "/accounts", "/eas", "/portfolio", "/strategy", "/backtests"):
             self._respond(404, {"error": "not found"})
             return
-        connection = open_database(self.server.db_path)
+        connection = open_storage(self.server.db_path, postgres_dsn)
         try:
             if parsed.path == "/":
                 page = render_dashboard(connection)
             elif parsed.path == "/logs":
                 page = render_logs(connection, parse_qs(parsed.query))
+            elif parsed.path == "/portfolio":
+                page = render_portfolio(connection, parse_qs(parsed.query))
+            elif parsed.path == "/backtests":
+                page = render_backtest_lab(connection, parse_qs(parsed.query),
+                                           "Backtest imported." if "imported" in parse_qs(parsed.query) else "",
+                                           self.server.csrf_token)
+            elif parsed.path == "/strategy":
+                page = render_strategy(connection, parse_qs(parsed.query))
+            elif parsed.path == "/eas":
+                page = render_eas(connection)
             else:
                 page = render_accounts(connection, parse_qs(parsed.query))
         finally:
@@ -205,6 +261,9 @@ class IngestHandler(BaseHTTPRequestHandler):
         self._respond_html(200, page)
 
     def do_POST(self) -> None:
+        if self.path == "/backtests/import":
+            self._import_backtest()
+            return
         if self.path not in ("/v1/ingest", "/v1/snapshot"):
             self._respond(404, {"error": "not found"})
             return
@@ -224,7 +283,7 @@ class IngestHandler(BaseHTTPRequestHandler):
             if length < 1 or length > MAX_BODY_BYTES:
                 raise ValueError("invalid body length")
             payload = json.loads(self.rfile.read(length))
-            connection = open_database(self.server.db_path)
+            connection = open_storage(self.server.db_path, getattr(self.server, "postgres_dsn", None))
             try:
                 result = (ingest(connection, payload, authorized_host) if self.path == "/v1/ingest"
                           else store_snapshot(connection, payload, authorized_host))
@@ -234,3 +293,50 @@ class IngestHandler(BaseHTTPRequestHandler):
             self._respond(400, {"error": str(exc)})
             return
         self._respond(200, result)
+
+    def _import_backtest(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 1 <= length <= MAX_BODY_BYTES + 65536:
+                raise ValueError("Upload exceeds the 4 MB file limit")
+            content_type = self.headers.get("Content-Type", "")
+            if not content_type.lower().startswith("multipart/form-data;"):
+                raise ValueError("Expected a file upload")
+            message = BytesParser(policy=policy.default).parsebytes(
+                b"Content-Type: " + content_type.encode("ascii") + b"\r\nMIME-Version: 1.0\r\n\r\n"
+                + self.rfile.read(length))
+            fields = {}
+            filename = ""
+            content = None
+            for part in message.iter_parts():
+                name = part.get_param("name", header="content-disposition")
+                if name == "file":
+                    filename = part.get_filename() or ""
+                    content = part.get_payload(decode=True)
+                elif name in ("strategy", "currency", "starting_capital", "csrf_token"):
+                    fields[name] = (part.get_payload(decode=True) or b"").decode("utf-8")
+            if not hmac.compare_digest(fields.get("csrf_token", ""), self.server.csrf_token):
+                self._respond(403, {"error": "invalid form token"})
+                return
+            if content is None:
+                raise ValueError("Choose a backtest file")
+            connection = open_storage(self.server.db_path, getattr(self.server, "postgres_dsn", None))
+            try:
+                import_backtest(connection, strategy=fields.get("strategy", ""),
+                                currency=fields.get("currency", ""),
+                                starting_capital=fields.get("starting_capital", ""),
+                                file_name=filename, content=content)
+            finally:
+                connection.close()
+        except (ValueError, UnicodeDecodeError, UnicodeEncodeError) as exc:
+            connection = open_storage(self.server.db_path, getattr(self.server, "postgres_dsn", None))
+            try:
+                page = render_backtest_lab(connection, {}, str(exc), self.server.csrf_token)
+            finally:
+                connection.close()
+            self._respond_html(400, page)
+            return
+        self.send_response(303)
+        self.send_header("Location", "/backtests?imported=1")
+        self.send_header("Content-Length", "0")
+        self.end_headers()

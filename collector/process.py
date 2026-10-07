@@ -11,12 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from shared.paths import windows_path
+
 
 PROCESS_POLL_SECONDS = 30
-
-
-def _windows_path(value: str) -> str:
-    return ntpath.normcase(ntpath.normpath(value.strip().strip('"')))
 
 
 def _decode_origin(raw: bytes) -> str:
@@ -41,14 +39,14 @@ def install_path(data_path: Path) -> str | None:
             decoded = _decode_origin(raw).strip("\ufeff\x00\r\n ")
             first_line = next((line.strip() for line in decoded.splitlines() if line.strip()), "")
             if first_line:
-                normalized = _windows_path(first_line)
+                normalized = windows_path(first_line)
                 if ntpath.basename(normalized) in ("terminal64.exe", "terminal.exe"):
                     normalized = ntpath.dirname(normalized)
                 return normalized
         except OSError:
             return None
     if any((data_path / name).is_file() for name in ("terminal64.exe", "terminal.exe")):
-        return _windows_path(str(data_path))
+        return windows_path(str(data_path))
     return None
 
 
@@ -111,7 +109,7 @@ def classify_terminal(data_path: Path, snapshot: ProcessSnapshot) -> dict:
         result["reason"] = "No readable origin.txt or portable terminal executable"
         return result
     for pid, executable in snapshot.processes:
-        if executable and _windows_path(ntpath.dirname(executable)) == expected_install:
+        if executable and windows_path(ntpath.dirname(executable)) == expected_install:
             result.update({"state": "running", "pid": pid})
             return result
     if not snapshot.complete:

@@ -42,9 +42,11 @@ class WebViewTest(unittest.TestCase):
     def test_status_uses_explicit_process_state_and_escapes_data(self) -> None:
         page = render_dashboard(self.connection)
         self.assertIn("Collector online", page)
-        self.assertIn("Folder found", page)
+        self.assertIn('badge good">Found</span>', page)
         self.assertIn("Running", page)
-        self.assertIn("Expected folders not configured", page)
+        self.assertIn("Expected terminals not configured", page)
+        self.assertIn("Account unavailable", page)
+        self.assertNotIn(r"C:\MetaQuotes\Terminal\FIRST", page)
         self.assertNotIn("<script>", page)
 
     def test_log_filter_escapes_raw_lines(self) -> None:
@@ -52,6 +54,8 @@ class WebViewTest(unittest.TestCase):
         self.assertIn("error &lt;script&gt;alert(1)&lt;/script&gt;", page)
         self.assertNotIn("normal journal", page)
         self.assertNotIn("<script>", page)
+        self.assertNotIn("20260929.log", page)
+        self.assertNotIn("Terminal ID", page)
 
     def test_archived_folder_is_not_reported_missing(self) -> None:
         path = r"C:\MetaQuotes\Terminal\FIRST"
@@ -65,9 +69,9 @@ class WebViewTest(unittest.TestCase):
             },
         }, "host-one")
         page = render_dashboard(self.connection)
-        self.assertIn("Archived folder", page)
+        self.assertIn('badge neutral">Archived</span>', page)
         self.assertIn("archived: 1", page)
-        self.assertIn("0 folders missing", page)
+        self.assertIn("0 missing from online hosts", page)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,8 @@ import tempfile
 from contextlib import closing
 from pathlib import Path
 
+from shared.sqlite import open_readonly
+
 from .audit import build_report
 
 
@@ -20,10 +22,10 @@ def check_restore(backup: Path, directory: Path | None = None) -> dict:
     workdir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="dashboard-restore-check-", dir=workdir) as temporary:
         restored = Path(temporary) / "central-restored.sqlite3"
-        with closing(sqlite3.connect(backup.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)) as source:
+        with closing(open_readonly(backup)) as source:
             with closing(sqlite3.connect(restored, timeout=30)) as target:
                 source.backup(target, pages=1000, sleep=0.1)
-        with closing(sqlite3.connect(restored.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+        with closing(open_readonly(restored)) as connection:
             result = connection.execute("PRAGMA integrity_check").fetchone()
             if result != ("ok",):
                 raise RuntimeError(f"restored database integrity check failed: {result}")

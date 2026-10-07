@@ -6,13 +6,11 @@ import argparse
 import json
 import ntpath
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+
+from shared.timezones import day_zone
+from shared.paths import same_windows_path
 
 from .process import list_terminal_processes
-
-
-def _same_path(left: str, right: str) -> bool:
-    return ntpath.normcase(ntpath.normpath(left)) == ntpath.normcase(ntpath.normpath(right))
 
 
 def _number(value: object) -> float:
@@ -41,12 +39,12 @@ def collect(mt5: object, data_path: str, executable: str, login: int, server: st
     """Connect to one running terminal; never request login or send an order."""
     now = now or datetime.now(timezone.utc)
     result: dict = {"status": {"state": "unknown", "reason": "MT5 connection unavailable"}}
-    portable = _same_path(data_path, ntpath.dirname(executable))
+    portable = same_windows_path(data_path, ntpath.dirname(executable))
     if not mt5.initialize(executable, timeout=10000, portable=portable):
         return result
     try:
         info = mt5.terminal_info()
-        if info is None or not _same_path(str(info.data_path), data_path) or not _same_path(str(info.path), ntpath.dirname(executable)):
+        if info is None or not same_windows_path(str(info.data_path), data_path) or not same_windows_path(str(info.path), ntpath.dirname(executable)):
             result["status"] = {"state": "unknown", "reason": "MT5 attached to a different terminal"}
             return result
         connected = bool(info.connected)
@@ -68,7 +66,7 @@ def collect(mt5: object, data_path: str, executable: str, login: int, server: st
         if not connected:
             return result
         positions = mt5.positions_get()
-        zone = ZoneInfo(day_timezone)
+        zone = day_zone(day_timezone)
         local_now = now.astimezone(zone)
         local_start = datetime.combine(
             local_now.date() - timedelta(days=history_days - 1), datetime.min.time(), tzinfo=zone,
@@ -80,7 +78,8 @@ def collect(mt5: object, data_path: str, executable: str, login: int, server: st
         if len(positions) > 2000 or len(deals) > 10000:
             result["status"]["reason"] = "MT5 snapshot exceeds supported size; reduce history_days"
             return result
-        result["account"] = {"login": login, "server": server, "currency": str(account.currency)}
+        result["account"] = {"login": login, "server": server, "currency": str(account.currency),
+                             "balance": _number(account.balance)}
         result["history_start_day"] = local_start.date().isoformat()
         result["positions"] = [
             {
@@ -101,6 +100,7 @@ def collect(mt5: object, data_path: str, executable: str, login: int, server: st
                 "day_local": datetime.fromtimestamp(int(deal.time), timezone.utc).astimezone(zone).date().isoformat(),
                 "type": int(deal.type), "kind": _deal_kind(mt5, int(deal.type)), "entry": int(deal.entry),
                 "position_id": int(deal.position_id), "symbol": str(deal.symbol),
+                "volume": _number(getattr(deal, "volume", 0)),
                 "magic": int(deal.magic), "comment": str(deal.comment),
                 "profit": _number(deal.profit), "commission": _number(deal.commission),
                 "swap": _number(deal.swap), "fee": _number(deal.fee),
@@ -124,7 +124,7 @@ def main() -> None:
     parser.add_argument("--history-days", type=int, required=True)
     args = parser.parse_args()
     snapshot = list_terminal_processes()
-    if not any(pid == args.pid and path and _same_path(path, args.exe)
+    if not any(pid == args.pid and path and same_windows_path(path, args.exe)
                for pid, path in snapshot.processes):
         print(json.dumps({"status": {"state": "unknown", "reason": "MT5 process ended before API attach"}}))
         return

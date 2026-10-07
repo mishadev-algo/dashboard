@@ -4,7 +4,7 @@ This guide turns [idea.md](idea.md) into a build order. The first requirement is
 
 ## Alpha outcome
 
-The alpha should show, on one page, all registered terminals and whether each is running, when its Journal and Experts logs were last received, recent errors, and the current account. It should also show basic account positions and realized PnL, and send a small set of actionable Telegram alerts. The dashboard is read-only: it does not place or modify trades.
+The alpha should show, on one page, all registered terminals and whether each is running, when its Journal and Experts logs were last received, recent errors, and the current account. It should also show basic account positions, realized PnL, a list of closed deals, and a small set of actionable Telegram alerts. Send one Telegram notification with account, instrument, position/deal identity, and result when a new close is observed. The dashboard is read-only: it does not place or modify trades.
 
 **Out of alpha:** automated live-versus-backtest comparison, AI diagnosis, full EA version/parameter inventory, and automated detection of different trade decisions across accounts. Those need reliable trade and EA identity data first. Keep the data model ready for them.
 
@@ -71,8 +71,11 @@ Suggested small stack: Python collector, Python/FastAPI API and server-rendered 
 - Start with collector offline, expected terminal stopped/missing, broker disconnected (if probe available), and selected repeated Journal/Experts errors.
 - Deduplicate by terminal + alert type, add a cooldown and a recovery message, and expose the alert state in the UI. Do not send every log line as a Telegram message.
 - Keep bot token and chat ID in server secrets, not in source or log messages. Telegram's Bot API supports sending text with `sendMessage`. [Telegram Bot API](https://core.telegram.org/bots/api#sendmessage)
+- Monitor server availability from another host so a server or VPS outage sends a notification while the service is down. A terminal that is explicitly stopped must also trigger a timely notification; verify both failure and recovery delivery on a safe test setup.
 
 **Done when:** each simulated failure sends one useful alert and one recovery notice, without alert storms.
+
+**Observed on the current VPS:** the server-down message arrives only after recovery, and stopping a terminal has not produced a Telegram notification. Treat these as open live validation issues until the failure and recovery messages are observed with timestamps.
 
 ### 7. Add basic account data and PnL
 
@@ -80,6 +83,7 @@ Suggested small stack: Python collector, Python/FastAPI API and server-rendered 
 - Run one isolated worker process per terminal and verify that the returned account login/server matches the expected mapping before accepting data. Never mix deals from two accounts that used the same terminal at different times.
 - Store deals by broker/server + account login + deal ticket. Show open positions and realized PnL by account and date in the account currency. Reconcile the result against MT5 History, including commission, swap, and fees; keep deposits/withdrawals separate from trading PnL. The official deal API exposes the required fields. [Deal history API](https://www.mql5.com/en/docs/python_metatrader5/mt5historydealsget_py), [deal properties](https://www.mql5.com/en/docs/constants/tradingconstants/dealproperties)
 - Map `magic` numbers and comments to strategies only where there is an explicit registry. Show `unmapped` otherwise; preserve the raw values for later strategy comparison.
+- Keep exit-deal history visible for each account and retain the data needed for a future equity chart. A true account equity curve requires periodic balance and equity samples, including floating PnL; closed deals alone support a realized-PnL curve. Confirm which curve is required before designing the sampling and retention policy.
 
 **Done when:** positions and a chosen day's realized PnL match MT5 for two different accounts, and unmapped trades stay visibly unmapped.
 
@@ -90,7 +94,7 @@ Suggested small stack: Python collector, Python/FastAPI API and server-rendered 
 - Compare a small sample of Journal and Experts entries with MT5 itself. Compare positions and PnL against MT5 History. Confirm Telegram failure/recovery notifications.
 - Document installation, configuration, backup, restart, and a simple way to inspect collector errors.
 
-**Alpha release gate:** zero unaccounted expected terminals; both log streams represented for every terminal that produces them; no lost or duplicate lines in the trial; clear offline/missing states; correct account attribution and reconciled PnL; Telegram alerts recover cleanly.
+**Alpha release gate:** zero unaccounted expected terminals; both log streams represented for every terminal that produces them; no lost or duplicate lines in the trial; clear offline/missing states; correct account attribution and reconciled PnL; closed-deal history and notifications verified; server and terminal outage alerts delivered during failure and recover cleanly.
 
 ## Next after alpha
 

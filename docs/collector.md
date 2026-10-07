@@ -43,7 +43,7 @@ The fixture creates two terminals and proves that four labeled streams enter SQL
 
 The collector currently scans new files from the last two days by default and continues tracking files it has already seen. Use `--lookback-days` to widen initial history. Logs can be buffered by MT5 before they reach disk, so file collection can lag the terminal UI.
 
-When remote delivery is enabled on Windows, the collector also checks MT5 process executable paths about every 30 seconds. It matches normal installs through each data folder's `origin.txt` and portable installs through a terminal executable in the data folder. If it cannot read an install or process path, it reports process state as `unknown`; log silence alone does not imply a stopped terminal.
+When remote delivery is enabled on Windows, the collector checks MT5 process executable paths when preparing each heartbeat, once every five minutes by default. It matches normal installs through each data folder's `origin.txt` and portable installs through a terminal executable in the data folder. If it cannot read an install or process path, it reports process state as `unknown`; log silence alone does not imply a stopped terminal. New log lines enter the local queue during the two-second scan and upload with the next heartbeat; a large backlog can use multiple POSTs.
 
 The console's `events` number counts newly stored complete lines in that scan. A large first count followed by zero is normal when there are no new lines on disk. `discovered` counts folders found under configured roots and exact expected paths. Empty `missing` and `unknown` values do not prove full coverage unless `--expected` or an inventory file was supplied.
 

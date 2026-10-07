@@ -14,9 +14,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from shared.cadence import UPLOAD_INTERVAL_SECONDS
+from shared.network import server_origin
+from shared.paths import windows_path
+from shared.timezones import day_zone
 
 from .core import terminal_id
 from .process import ProcessSnapshot, classify_terminal, install_path, list_terminal_processes
@@ -56,19 +59,13 @@ def load_targets(path: Path) -> tuple[AccountTarget, ...]:
             raise ValueError("account login and server are required")
         if type(history_days) is not int or not 1 <= history_days <= 90:
             raise ValueError("history_days must be between 1 and 90")
-        try:
-            ZoneInfo(day_timezone)
-        except (TypeError, ZoneInfoNotFoundError):
-            raise ValueError(
-                f"invalid day_timezone: {day_timezone}; use an IANA name "
-                "(fixed UTC+3 is Etc/GMT-3)"
-            ) from None
+        day_zone(day_timezone)
         if not isinstance(strategies, dict) or any(
             not str(key).isdigit() or not isinstance(value, str) or not value.strip()
             for key, value in strategies.items()
         ):
             raise ValueError("strategies must map magic numbers to names")
-        normalized = ntpath.normcase(ntpath.normpath(data_path))
+        normalized = windows_path(data_path)
         if normalized in seen:
             raise ValueError("duplicate account data_path")
         seen.add(normalized)
@@ -81,18 +78,16 @@ def load_targets(path: Path) -> tuple[AccountTarget, ...]:
     return tuple(targets)
 
 
-def _origin(server_url: str) -> str:
-    parsed = urlsplit(server_url)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise ValueError("server-url must be an HTTP(S) origin")
-    if parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
-        raise ValueError("server-url must use HTTPS except for localhost")
-    if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
-        raise ValueError("server-url must be an origin without a path or query")
-    return server_url.rstrip("/")
+def validate_account_coverage(expected: tuple[Path, ...], targets: tuple[AccountTarget, ...]) -> None:
+    known = {windows_path(str(path)) for path in expected}
+    missing = [str(target.data_path) for target in targets
+               if windows_path(str(target.data_path)) not in known]
+    if missing:
+        raise ValueError("account target(s) missing from inventory expected: " + ", ".join(missing))
 
 
-def probe_target(target: AccountTarget, host_id: str, processes: ProcessSnapshot) -> dict:
+def probe_target(target: AccountTarget, host_id: str, processes: ProcessSnapshot,
+                 timeout: float = 30) -> dict:
     """Run the MT5 API in a fresh process only for a confirmed running executable."""
     process = classify_terminal(target.data_path, processes)
     status: dict = {"state": process["state"]}
@@ -114,7 +109,7 @@ def probe_target(target: AccountTarget, host_id: str, processes: ProcessSnapshot
                 "--day-timezone", target.day_timezone, "--history-days", str(target.history_days),
             ]
             try:
-                completed = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+                completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
                 if completed.returncode:
                     status = {"state": "unknown", "reason": "MT5 account probe failed"}
                 else:
@@ -152,13 +147,16 @@ def upload_snapshot(server_url: str, host_id: str, token: str, payload: dict) ->
     if len(body) > 4 * 1024 * 1024:
         raise ValueError("account snapshot exceeds 4 MiB; reduce history_days")
     request = Request(
-        _origin(server_url) + "/v1/snapshot", data=body, method="POST",
+        server_origin(server_url) + "/v1/snapshot", data=body, method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
     )
     try:
         with urlopen(request, timeout=15) as response:
             acknowledgement = json.load(response)
-    except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
+    except HTTPError as exc:
+        exc.close()
+        raise RuntimeError(f"snapshot upload failed: {exc}") from exc
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
         raise RuntimeError(f"snapshot upload failed: {exc}") from exc
     if not isinstance(acknowledgement, dict) or acknowledgement.get("terminal_id") != payload["terminal_id"]:
         raise RuntimeError("snapshot acknowledgement does not match terminal")
@@ -169,14 +167,14 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--host-id", default=socket.gethostname())
     parser.add_argument("--server-url", required=True)
-    parser.add_argument("--interval", type=float, default=60.0)
+    parser.add_argument("--interval", type=float, default=UPLOAD_INTERVAL_SECONDS)
     parser.add_argument("--follow", action="store_true")
     args = parser.parse_args()
     if args.interval <= 0:
         parser.error("interval must be positive")
     try:
         targets = load_targets(args.config)
-        _origin(args.server_url)
+        server_origin(args.server_url)
         token = os.environ["DASHBOARD_COLLECTOR_TOKEN"]
         if not token:
             raise ValueError("DASHBOARD_COLLECTOR_TOKEN is required")

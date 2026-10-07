@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily MT5 dashboard database backup
+
+[Timer]
+OnCalendar=*-*-* 02:20:00 UTC
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target

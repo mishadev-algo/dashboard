@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import math
-import ntpath
 import sqlite3
 from datetime import date, datetime, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from shared.timezones import day_zone
+from shared.paths import same_windows_path
 
 
 def ensure_schema(connection: sqlite3.Connection) -> None:
@@ -20,7 +21,7 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS accounts (
             server TEXT NOT NULL, login INTEGER NOT NULL, currency TEXT NOT NULL,
             day_timezone TEXT NOT NULL, host_id TEXT NOT NULL, terminal_id TEXT NOT NULL,
-            latest_snapshot_utc TEXT NOT NULL, history_start_day TEXT NOT NULL,
+            latest_snapshot_utc TEXT NOT NULL, history_start_day TEXT NOT NULL, balance TEXT,
             PRIMARY KEY (server, login)
         );
         CREATE TABLE IF NOT EXISTS positions (
@@ -36,11 +37,40 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
             kind TEXT NOT NULL, entry INTEGER NOT NULL, position_id INTEGER NOT NULL,
             symbol TEXT NOT NULL, magic INTEGER NOT NULL, strategy TEXT NOT NULL,
             comment TEXT NOT NULL, profit TEXT NOT NULL, commission TEXT NOT NULL,
-            swap TEXT NOT NULL, fee TEXT NOT NULL,
+            swap TEXT NOT NULL, fee TEXT NOT NULL, volume REAL NOT NULL DEFAULT 0,
             PRIMARY KEY (server, login, ticket)
         );
         CREATE INDEX IF NOT EXISTS idx_deals_account_day ON deals(server, login, day_local);
+        CREATE TABLE IF NOT EXISTS close_alert_baselines (
+            server TEXT NOT NULL, login INTEGER NOT NULL, initialized_utc TEXT NOT NULL,
+            PRIMARY KEY (server, login)
+        );
+        CREATE TABLE IF NOT EXISTS close_notifications (
+            server TEXT NOT NULL, login INTEGER NOT NULL, ticket INTEGER NOT NULL,
+            state TEXT NOT NULL, created_utc TEXT NOT NULL, last_attempt_utc TEXT,
+            sent_utc TEXT, last_error TEXT,
+            PRIMARY KEY (server, login, ticket)
+        );
     """)
+    if "volume" not in {row[1] for row in connection.execute("PRAGMA table_info(deals)")}:
+        connection.execute("ALTER TABLE deals ADD COLUMN volume REAL NOT NULL DEFAULT 0")
+    if "balance" not in {row[1] for row in connection.execute("PRAGMA table_info(accounts)")}:
+        connection.execute("ALTER TABLE accounts ADD COLUMN balance TEXT")
+    # Upgraded databases already contain history. Baseline those deals before the
+    # first new snapshot so only closes observed after deployment are notified.
+    with connection:
+        connection.execute(
+            "INSERT OR IGNORE INTO close_notifications (server,login,ticket,state,created_utc) "
+            "SELECT d.server,d.login,d.ticket,'baseline',a.latest_snapshot_utc "
+            "FROM deals d JOIN accounts a USING (server,login) "
+            "WHERE d.kind='trade' AND d.entry IN (1,2,3) "
+            "AND NOT EXISTS (SELECT 1 FROM close_alert_baselines b "
+            "WHERE b.server=d.server AND b.login=d.login)"
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO close_alert_baselines "
+            "SELECT server,login,latest_snapshot_utc FROM accounts"
+        )
 
 
 def _integer(value: object, field: str) -> int:
@@ -81,11 +111,8 @@ def _date(value: object, field: str) -> str:
     return stamp
 
 
-def _same_path(left: str, right: str) -> bool:
-    return ntpath.normcase(ntpath.normpath(left)) == ntpath.normcase(ntpath.normpath(right))
-
-
-def store_snapshot(connection: sqlite3.Connection, payload: object, authorized_host: str) -> dict:
+def store_snapshot(connection: sqlite3.Connection, payload: object, authorized_host: str,
+                   historical_backfill: bool = False) -> dict:
     if not isinstance(payload, dict) or payload.get("host_id") != authorized_host:
         raise ValueError("host_id does not match token")
     terminal_id = _text(payload.get("terminal_id"), "terminal_id", 100)
@@ -96,10 +123,7 @@ def store_snapshot(connection: sqlite3.Connection, payload: object, authorized_h
         raise ValueError("invalid expected_login")
     expected_server = _text(payload.get("expected_server"), "expected_server", 200)
     day_timezone = _text(payload.get("day_timezone"), "day_timezone", 100)
-    try:
-        ZoneInfo(day_timezone)
-    except ZoneInfoNotFoundError:
-        raise ValueError("invalid day_timezone") from None
+    day_zone(day_timezone)
     status = payload.get("status")
     if not isinstance(status, dict) or status.get("state") not in ("ok", "unknown", "stopped", "account_mismatch"):
         raise ValueError("invalid status")
@@ -121,7 +145,7 @@ def store_snapshot(connection: sqlite3.Connection, payload: object, authorized_h
         "SELECT data_path FROM terminals WHERE host_id=? AND terminal_id=?",
         (authorized_host, terminal_id),
     ).fetchone()
-    if known is None or not _same_path(known[0], data_path):
+    if known is None or not same_windows_path(known[0], data_path):
         raise ValueError("terminal is not registered under this host/path")
     account = None
     positions: list[tuple] = []
@@ -131,6 +155,7 @@ def store_snapshot(connection: sqlite3.Connection, payload: object, authorized_h
         if not isinstance(account, dict) or account.get("login") != expected_login or account.get("server") != expected_server:
             raise ValueError("account does not match configured login/server")
         currency = _text(account.get("currency"), "currency", 20)
+        balance = _number(account["balance"], "account balance") if "balance" in account else None
         history_start_day = _date(payload.get("history_start_day"), "history_start_day")
         if not currency:
             raise ValueError("currency is required")
@@ -179,6 +204,7 @@ def store_snapshot(connection: sqlite3.Connection, payload: object, authorized_h
                 strategy_map.get(magic, "unmapped") if kind == "trade" else "unmapped",
                 _text(deal.get("comment"), "deal comment", 500),
                 *(_number(deal.get(field), field) for field in ("profit", "commission", "swap", "fee")),
+                float(_number(deal.get("volume", 0), "deal volume")),
             ))
     received = datetime.now(timezone.utc).isoformat()
     with connection:
@@ -189,23 +215,40 @@ def store_snapshot(connection: sqlite3.Connection, payload: object, authorized_h
             (authorized_host, terminal_id, data_path, observed, received, json.dumps(status)),
         )
         if complete:
+            baseline_exists = connection.execute(
+                "SELECT 1 FROM close_alert_baselines WHERE server=? AND login=?",
+                (expected_server, expected_login),
+            ).fetchone() is not None
             connection.execute(
-                "INSERT INTO accounts VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(server,login) DO UPDATE SET "
+                "INSERT INTO accounts VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(server,login) DO UPDATE SET "
                 "currency=excluded.currency,day_timezone=excluded.day_timezone,host_id=excluded.host_id,"
                 "terminal_id=excluded.terminal_id,latest_snapshot_utc=excluded.latest_snapshot_utc,"
-                "history_start_day=excluded.history_start_day",
+                "history_start_day=excluded.history_start_day,"
+                "balance=COALESCE(excluded.balance,accounts.balance)",
                 (expected_server, expected_login, currency, day_timezone, authorized_host, terminal_id,
-                 received, history_start_day),
+                 received, history_start_day, balance),
             )
             connection.execute("DELETE FROM positions WHERE server=? AND login=?", (expected_server, expected_login))
             connection.executemany("INSERT INTO positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", positions)
             connection.executemany(
-                "INSERT INTO deals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "INSERT INTO deals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(server,login,ticket) DO UPDATE SET "
                 "time_utc=excluded.time_utc,day_local=excluded.day_local,type=excluded.type,kind=excluded.kind,"
                 "entry=excluded.entry,position_id=excluded.position_id,symbol=excluded.symbol,magic=excluded.magic,"
                 "strategy=excluded.strategy,comment=excluded.comment,profit=excluded.profit,"
-                "commission=excluded.commission,swap=excluded.swap,fee=excluded.fee",
+                "commission=excluded.commission,swap=excluded.swap,fee=excluded.fee,volume=excluded.volume",
                 deals,
+            )
+            close_tickets = [(expected_server, expected_login, row[2],
+                              "pending" if baseline_exists and not historical_backfill else "baseline", received)
+                             for row in deals if row[6] == "trade" and row[7] in (1, 2, 3)]
+            connection.executemany(
+                "INSERT INTO close_notifications (server,login,ticket,state,created_utc) "
+                "VALUES (?,?,?,?,?) ON CONFLICT(server,login,ticket) DO NOTHING", close_tickets,
+            )
+            connection.execute(
+                "INSERT INTO close_alert_baselines VALUES (?,?,?) "
+                "ON CONFLICT(server,login) DO NOTHING",
+                (expected_server, expected_login, received),
             )
     return {"terminal_id": terminal_id, "positions": len(positions), "deals": len(deals)}

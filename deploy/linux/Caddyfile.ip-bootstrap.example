@@ -1,0 +1,10 @@
+# Replace PUBLIC_IP before use. This temporary configuration only serves ACME challenges.
+http://PUBLIC_IP {
+    handle /.well-known/acme-challenge/* {
+        root * /var/www/letsencrypt
+        file_server
+    }
+    handle {
+        respond "Certificate setup in progress" 503
+    }
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ from pathlib import Path
 
 from server.audit import build_report
 from server.backup import create_backup
+from server.export_postgres import export_backup
 from server.ingest import open_database
 from server.restore_check import check_restore
 
@@ -50,7 +52,8 @@ class ReleaseToolsTest(unittest.TestCase):
                              "autotrading": True, "data_complete": True})),
             )
             self.connection.execute(
-                "INSERT INTO accounts VALUES (?,?,?,?,?,?,?,?)",
+                "INSERT INTO accounts (server,login,currency,day_timezone,host_id,terminal_id,"
+                "latest_snapshot_utc,history_start_day) VALUES (?,?,?,?,?,?,?,?)",
                 ("Broker", 123, "USD", "UTC", "vps", "one", self.now.isoformat(),
                  self.now.date().isoformat()),
             )
@@ -119,6 +122,52 @@ class ReleaseToolsTest(unittest.TestCase):
         with self.assertRaises(sqlite3.DatabaseError):
             check_restore(invalid, scratch)
         self.assertFalse(list(scratch.iterdir()))
+
+    def test_postgres_export_keeps_all_rows_and_copy_escapes(self) -> None:
+        self.seed()
+        raw_line = "path\\segment\tvalue\nnext\rline"
+        with self.connection:
+            self.connection.execute("UPDATE log_events SET raw_line=? WHERE event_id='journal'", (raw_line,))
+            self.connection.execute(
+                "INSERT INTO backtest_runs VALUES (?,?,?,?,?,?,?,?,?,?)",
+                ("run-one", "strategy", "test.csv", "hash-one", "USD", "1000",
+                 "2026-09-30", "2026-09-30", 1, self.now.isoformat()),
+            )
+            self.connection.execute(
+                "INSERT INTO backtest_days VALUES (?,?,?)", ("run-one", "2026-09-30", "12.5"),
+            )
+            self.connection.execute(
+                "INSERT INTO alerts VALUES (?,?,?,?,?,?,?,?,?,?)",
+                ("vps", "offline", "one", "active", "detail", self.now.isoformat(),
+                 None, None, 0, None),
+            )
+        backup = create_backup(self.db_path, self.root / "backups", self.now)
+        output = self.root / "postgres-export"
+        manifest = export_backup(backup, output)
+        self.assertEqual(manifest["tables"]["log_events"]["rows"], 2)
+        self.assertEqual(manifest["tables"]["alerts"]["rows"], 1)
+        self.assertEqual(manifest["tables"]["backtest_runs"]["rows"], 1)
+        self.assertEqual(manifest["tables"]["backtest_days"]["rows"], 1)
+        self.assertEqual(len(manifest["tables"]), 13)
+        log_bytes = (output / "log_events.copy").read_bytes()
+        self.assertIn(b"path\\\\segment\\tvalue\\nnext\\rline", log_bytes)
+        self.assertIn(b"\t\\N\t\\N\t0\t\\N\n", (output / "alerts.copy").read_bytes())
+        self.assertEqual(manifest["tables"]["log_events"]["sha256"],
+                         hashlib.sha256(log_bytes).hexdigest())
+        self.assertIn("\\copy log_events", (output / "load.psql").read_text(encoding="utf-8"))
+        self.assertIn("\\copy backtest_days", (output / "load.psql").read_text(encoding="utf-8"))
+        self.assertIn("row count mismatch for log_events", (output / "load.psql").read_text(encoding="utf-8"))
+        self.assertIn("CREATE TABLE log_events", (output / "schema.sql").read_text(encoding="utf-8"))
+        with self.assertRaisesRegex(ValueError, "output already exists"):
+            export_backup(backup, output)
+
+    def test_postgres_export_rejects_schema_drift_without_publishing(self) -> None:
+        with self.connection:
+            self.connection.execute("DROP TABLE alerts")
+        output = self.root / "postgres-export"
+        with self.assertRaisesRegex(ValueError, "alerts columns differ"):
+            export_backup(self.db_path, output)
+        self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":

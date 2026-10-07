@@ -1,6 +1,13 @@
-# Replace dashboard.example.com and the bcrypt hash before use.
-# Keep the Python server bound to 127.0.0.1:8765.
+# Replace dashboard.example.com and the password hash before use.
+# Run this only on the central host. Keep Python bound to 127.0.0.1:8765.
 dashboard.example.com {
+    @health {
+        method GET
+        path /health
+    }
+    handle @health {
+        reverse_proxy 127.0.0.1:8765
+    }
     @collector {
         method POST
         path /v1/ingest /v1/snapshot
@@ -12,6 +19,10 @@ dashboard.example.com {
         basic_auth {
             operator REPLACE_WITH_CADDY_PASSWORD_HASH
         }
-        reverse_proxy 127.0.0.1:8765
+        reverse_proxy 127.0.0.1:8765 {
+            # Browser Basic credentials are for Caddy only.
+            header_up -Authorization
+            header_up -Proxy-Authorization
+        }
     }
 }

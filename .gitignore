@@ -10,7 +10,15 @@ __pycache__/
 inventory.json
 accounts.json
 backups/
+postgres-export/
+dist/
+.deploy/
 alpha-audit*.json
 Caddyfile
 .dashboard-start.local.json
+.dashboard-remote.local.json
+.dashboard-monitor-state.json
 run-logs/
+.vscode/
+https_/
+*.ex5

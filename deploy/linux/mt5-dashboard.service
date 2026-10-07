@@ -1,0 +1,25 @@
+[Unit]
+Description=MT5 central ingest, dashboard and alerts
+Wants=network-online.target
+After=network-online.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=dashboard
+Group=dashboard
+WorkingDirectory=/opt/mt5-dashboard
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/etc/mt5-dashboard/central.env
+ExecStart=/opt/mt5-dashboard/.venv/bin/python -m server.run_central --postgres
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

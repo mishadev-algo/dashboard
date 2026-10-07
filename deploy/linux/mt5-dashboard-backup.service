@@ -1,0 +1,14 @@
+[Unit]
+Description=Back up and verify MT5 dashboard PostgreSQL database
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=dashboard
+Group=dashboard
+ExecStart=/usr/local/sbin/mt5-dashboard-backup
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/mt5-dashboard
+PrivateTmp=true
+NoNewPrivileges=true

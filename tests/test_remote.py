@@ -5,6 +5,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing, redirect_stdout
 from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
 from collector.core import Collector, open_database
+from collector.__main__ import main as collector_main
 from collector.remote import RemoteUploadError, RemoteUploader, heartbeat, pending_count
 from server.ingest import IngestHandler, ingest, open_database as open_server_database
 
@@ -87,6 +89,69 @@ class RemoteDeliveryTest(unittest.TestCase):
                 uploader.upload(heartbeat(self.local, "test-host", result))
         self.assertEqual(pending_count(self.local), 1)
         self.assertEqual(self.central_count("log_events"), 0)
+
+    def test_event_only_upload_does_not_store_extra_heartbeat(self) -> None:
+        uploader = RemoteUploader(self.local, "http://127.0.0.1:8765", "test-host", "test-secret")
+        with patch("collector.remote.urlopen", side_effect=self.fake_urlopen) as request:
+            self.assertEqual(uploader.upload(None), 0)
+            request.assert_not_called()
+            first = self.collector.run_once()
+            self.assertEqual(uploader.upload(heartbeat(self.local, "test-host", first)), 0)
+            self.assertEqual(self.central_count("collector_heartbeats"), 1)
+            (self.folder / "Logs" / self.today).write_text("new log line\n", encoding="utf-8")
+            self.collector.run_once()
+            self.assertEqual(uploader.upload(None), 1)
+            self.assertEqual(pending_count(self.local), 0)
+        self.assertEqual(self.central_count("log_events"), 1)
+        self.assertEqual(self.central_count("collector_heartbeats"), 1)
+
+    def test_backlog_batches_store_only_one_heartbeat(self) -> None:
+        (self.folder / "Logs" / self.today).write_text("line one\nline two\n", encoding="utf-8")
+        result = self.collector.run_once()
+        uploader = RemoteUploader(self.local, "http://127.0.0.1:8765", "test-host", "test-secret", batch_size=1)
+        with patch("collector.remote.urlopen", side_effect=self.fake_urlopen):
+            self.assertEqual(uploader.upload(heartbeat(self.local, "test-host", result)), 2)
+        self.assertEqual(self.central_count("log_events"), 2)
+        self.assertEqual(self.central_count("collector_heartbeats"), 1)
+        saved = json.loads(self.central.execute("SELECT payload_json FROM collector_heartbeats").fetchone()[0])
+        self.assertEqual(saved["pending_count"], 0)
+
+    def test_collector_keeps_scanning_but_uploads_after_five_minutes(self) -> None:
+        calls: list[int] = []
+        elapsed = 0.0
+        log_path = self.folder / "Logs" / self.today
+
+        class FakeUploader:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            def upload(self, state: dict) -> int:
+                calls.append(state["pending_count"])
+                return 0
+
+        def sleep(seconds: float) -> None:
+            nonlocal elapsed
+            elapsed += seconds
+            if elapsed == 150:
+                log_path.write_text("queued during interval\n", encoding="utf-8")
+            if elapsed > 300:
+                raise KeyboardInterrupt
+
+        inventory = self.base / "inventory.json"
+        inventory.write_text(json.dumps({"expected": [str(self.folder)]}), encoding="utf-8")
+        argv = ["collector", "--db", str(self.base / "scheduled.db"),
+                "--root", str(self.root), "--inventory", str(inventory),
+                "--server-url", "http://127.0.0.1:8765",
+                "--interval", "150", "--follow"]
+        with patch("sys.argv", argv), patch("collector.__main__.RemoteUploader", FakeUploader), \
+             patch("collector.__main__.ProcessProbe", return_value=SimpleNamespace(check=lambda _: {})), \
+             patch("collector.__main__.time", SimpleNamespace(monotonic=lambda: elapsed, sleep=sleep)), \
+             patch.dict("os.environ", {"DASHBOARD_COLLECTOR_TOKEN": "test-secret"}), \
+             redirect_stdout(io.StringIO()):
+            collector_main()
+        self.assertEqual(calls, [0, 1])
+        with closing(open_database(self.base / "scheduled.db")) as scheduled:
+            self.assertEqual(pending_count(scheduled), 1)
 
     def test_http_handler_authenticates_heartbeat(self) -> None:
         result = self.collector.run_once()

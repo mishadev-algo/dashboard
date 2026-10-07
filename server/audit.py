@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from shared.cadence import STALE_AFTER_SECONDS
+from shared.sqlite import open_readonly
 
-COLLECTOR_STALE = timedelta(seconds=30)
-PROBE_STALE = timedelta(seconds=150)
+from .ingest import open_storage
+
+
+COLLECTOR_STALE = timedelta(seconds=STALE_AFTER_SECONDS)
+PROBE_STALE = timedelta(seconds=STALE_AFTER_SECONDS)
 
 
 def _parse(value: str | None) -> datetime | None:
@@ -156,13 +162,18 @@ def build_report(connection: sqlite3.Connection, now: datetime | None = None) ->
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Read-only MT5 alpha trial audit")
-    parser.add_argument("--db", type=Path, required=True)
+    storage = parser.add_mutually_exclusive_group(required=True)
+    storage.add_argument("--db", type=Path)
+    storage.add_argument("--postgres", action="store_true", help="Use DASHBOARD_POSTGRES_DSN")
     parser.add_argument("--output", type=Path, help="Write JSON report to this path instead of stdout")
     parser.add_argument("--strict", action="store_true", help="Exit with code 1 if findings are present")
     args = parser.parse_args()
-    if not args.db.is_file():
+    if args.db and not args.db.is_file():
         parser.error("central database does not exist")
-    connection = sqlite3.connect(args.db.resolve().as_uri() + "?mode=ro", uri=True)
+    postgres_dsn = os.environ.get("DASHBOARD_POSTGRES_DSN") if args.postgres else None
+    if args.postgres and not postgres_dsn:
+        parser.error("set DASHBOARD_POSTGRES_DSN for PostgreSQL storage")
+    connection = (open_storage(None, postgres_dsn) if args.postgres else open_readonly(args.db))
     try:
         report = build_report(connection)
     finally:

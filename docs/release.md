@@ -31,7 +31,7 @@ Keep the backup directory outside the web server's served paths and copy backups
 
 ## Restart after a VPS reboot
 
-The one-console launcher currently needs an open PowerShell window. [vps_task.ps1](../scripts/vps_task.ps1) prepares a Windows Task Scheduler job that runs the same launcher at the MT5 Windows user's **logon**. Logon is the chosen trigger because the worker attaches to that user's running MT5 terminals. A reboot without that user logging on does not start this job. The task must be checked on the VPS before relying on it.
+The one-console launcher needs an open PowerShell window when run manually. [vps_task.ps1](../scripts/vps_task.ps1) prepares a Windows Task Scheduler job that runs the same launcher at the MT5 Windows user's **logon**. Logon is the chosen trigger because the worker attaches to that user's running MT5 terminals. A reboot without that user logging on does not start this job. The `MT5Dashboard` task recovered after the October 1 VPS reboot and user logon; the instructions below are for a new or repaired installation.
 
 In the existing launcher PowerShell window, press Ctrl+C. The four environment variables remain in that window. Pull the current Git revision, then save the startup settings with the **existing** collector database filename and any previously used `-Root` or `-Terminal` paths:
 
@@ -58,13 +58,13 @@ $log = Get-ChildItem .\run-logs\dashboard-*.log | Sort-Object LastWriteTime -Des
 Get-Content $log.FullName -Tail 50
 ```
 
-Confirm `started server`, `started collector`, `started alerts`, `started accounts`, and a collector line with `pending=0`. Check `/` and `/accounts`, then verify one clean return after a VPS reboot and user logon. If the task fails, inspect its log and Task Scheduler's last result before starting a manual launcher. The task registration and DPAPI reload path were prepared locally but have not been run on the Windows VPS.
+Confirm `started server`, `started collector`, `started alerts`, `started accounts`, and a collector line with `pending=0`. Check `/` and `/accounts`, then verify one clean return after a VPS reboot and user logon. If the task fails, inspect its log and Task Scheduler's last result before starting a manual launcher.
 
 ## HTTPS and page authentication
 
 The Python server binds to loopback. For a public domain, a reverse proxy can terminate HTTPS and protect the pages. [Caddy's HTTPS guide](https://caddyserver.com/docs/quick-starts/https) documents the DNS and port 80/443 prerequisites; [its `basic_auth` directive](https://caddyserver.com/docs/caddyfile/directives/basic_auth) accepts a hashed password. [The reverse proxy directive](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy) forwards requests to the loopback server.
 
-Use [Caddyfile.example](Caddyfile.example) as a template after choosing the central host and domain. Replace its domain and password hash. Generate the hash interactively with `caddy hash-password`; do not put a plaintext password in the file or shell command history. Run `caddy validate --config Caddyfile` before starting Caddy.
+Use [Caddyfile.example](Caddyfile.example) as a template after choosing the central host and domain. Replace its domain and password hash. Generate the hash interactively with `caddy hash-password`; do not put a plaintext password in the file or shell command history. Run `caddy validate --config Caddyfile` before starting Caddy. The browser's Basic authorization header is removed before forwarding page requests to Python.
 
 After deployment, check these responses from outside the central host:
 
@@ -75,4 +75,4 @@ After deployment, check these responses from outside the central host:
 
 The Caddyfile routes only `POST /v1/ingest` and `POST /v1/snapshot` to the server without browser Basic authentication; the server still requires each host's bearer token. All other paths require Basic authentication at Caddy. Give every host a distinct token in `DASHBOARD_HOST_TOKENS`, set the matching `DASHBOARD_COLLECTOR_TOKEN` on its Windows workers, and rotate any token that has appeared in logs or shared material. Use `https://your-domain` as the workers' `--server-url`. Keep `central.db`, tokens, account configuration, and backups readable only by the service account.
 
-This is a deployment template, not a live deployment. Hosting, domain, DNS, service supervision, and the planned PostgreSQL move remain to be chosen and verified before remote alpha release.
+For the proposed separate central VPS, follow [central-vps.md](central-vps.md). It includes the endpoint choice, host-token split, and a tested SQLite-backup exporter for a PostgreSQL import rehearsal. An optional PostgreSQL runtime mode is implemented locally, but a real PostgreSQL integration trial has not run. Hosting, domain, DNS, remote service supervision, and external HTTPS checks remain to be completed before remote alpha release.

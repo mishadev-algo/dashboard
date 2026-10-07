@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import io
+import re
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -9,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from shared.cadence import STALE_AFTER_SECONDS
 from collector.accounts import AccountTarget, load_targets, probe_target
 from collector.mt5_snapshot import collect
 from collector.process import ProcessSnapshot
@@ -48,7 +50,7 @@ class FakeMt5:
                                trade_allowed=self.trading, build=5000)
 
     def account_info(self):
-        return SimpleNamespace(login=self.login, server="Broker-Live", currency="USD")
+        return SimpleNamespace(login=self.login, server="Broker-Live", currency="USD", balance=1016.5)
 
     def positions_get(self):
         return self.positions
@@ -112,11 +114,16 @@ class AccountSnapshotTest(unittest.TestCase):
         store_snapshot(self.connection, payload, "vps")
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM deals").fetchone()[0], 2)
         self.assertEqual(self.connection.execute("SELECT strategy FROM positions").fetchone()[0], "Gold EA")
-        page = render_accounts(self.connection, {"day": [self.now.date().isoformat()]}, self.now)
+        page = render_accounts(self.connection, {
+            "from": [self.now.date().isoformat()], "to": [self.now.date().isoformat()],
+        }, self.now)
         self.assertIn("16.50 USD", page)
         self.assertIn("1000.00 USD", page)
         self.assertIn("Gold EA", page)
         self.assertIn("Strategy PnL", page)
+        self.assertIn('class="balance-chart"', page)
+        self.assertIn("Latest balance: 1016.50 USD", page)
+        self.assertEqual(self.connection.execute("SELECT balance FROM accounts").fetchone()[0], "1016.5")
         status = render_dashboard(self.connection, self.now + timedelta(seconds=1))
         self.assertIn("Connected", status)
         self.assertIn("Disabled", status)
@@ -149,7 +156,7 @@ class AccountSnapshotTest(unittest.TestCase):
         messages = []
         evaluate(self.connection, messages.append, self.now + timedelta(seconds=1))
         self.assertEqual(len(messages), 1)
-        later = self.now + timedelta(seconds=151)
+        later = self.now + timedelta(seconds=STALE_AFTER_SECONDS + 1)
         with self.connection:
             self.connection.execute("UPDATE hosts SET last_heartbeat_utc=? WHERE host_id='vps'",
                                     (later.isoformat(),))
@@ -203,6 +210,23 @@ class AccountSnapshotTest(unittest.TestCase):
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM deals").fetchone()[0], 4)
         profits = dict(self.connection.execute("SELECT login,profit FROM deals WHERE ticket=1"))
         self.assertEqual(profits, {123: "20.0", 456: "-8.0"})
+        day = self.now.date().isoformat()
+        default_page = render_accounts(self.connection, {"from": [day], "to": [day]}, self.now)
+        self.assertIn('class="account-layout"', default_page)
+        self.assertIn('aria-label="Accounts"', default_page)
+        self.assertEqual(default_page.count(' aria-current="page"><span'), 1)
+        self.assertEqual(default_page.count("Strategy PnL"), 1)
+        self.assertIn("16.50 USD", default_page)
+        self.assertNotIn("-11.50 USD", default_page)
+        self.assertIn(f"login=456&amp;from={day}&amp;to={day}", default_page)
+        selected_page = render_accounts(
+            self.connection, {"server": ["Broker-Live"], "login": ["456"],
+                              "from": [day], "to": [day]}, self.now,
+        )
+        self.assertIn('name="login" value="456"', selected_page)
+        self.assertIn("-11.50 USD", selected_page)
+        self.assertNotIn("<strong>16.50 USD</strong>", selected_page)
+        self.assertEqual(selected_page.count("Strategy PnL"), 1)
 
     def test_unmapped_trade_stays_visible_in_strategy_breakdown(self) -> None:
         payload = self.payload()
@@ -211,10 +235,45 @@ class AccountSnapshotTest(unittest.TestCase):
                       "commission": 0.0, "swap": 0.0, "fee": 0.0})
         payload["deals"].append(extra)
         store_snapshot(self.connection, payload, "vps")
-        page = render_accounts(self.connection, {"day": [self.now.date().isoformat()]},
+        page = render_accounts(self.connection, {"from": [self.now.date().isoformat()],
+                                                 "to": [self.now.date().isoformat()]},
                                self.now + timedelta(seconds=1))
         self.assertIn("unmapped", page)
         self.assertIn("20.50 USD", page)
+
+    def test_period_filters_symbol_chart_and_recent_deals_but_not_balance_history(self) -> None:
+        payload = self.payload()
+        older = dict(payload["deals"][0])
+        older.update({"ticket": 3, "symbol": "EURUSD", "profit": -7.0,
+                      "commission": 0.0, "swap": 0.0, "fee": 0.0,
+                      "time_utc": (self.now - timedelta(days=3)).isoformat(),
+                      "day_local": (self.now - timedelta(days=3)).date().isoformat()})
+        payload["deals"].append(older)
+        store_snapshot(self.connection, payload, "vps")
+        full = render_accounts(self.connection, {}, self.now)
+        day = self.now.date().isoformat()
+        filtered = render_accounts(self.connection, {"from": [day], "to": [day]}, self.now)
+        self.assertIn("EURUSD", full)
+        self.assertIn("9.50 USD", full)
+        self.assertNotIn("EURUSD", filtered)
+        self.assertIn("16.50 USD", filtered)
+        self.assertEqual(re.search(r'<svg class="balance-chart".*?</svg>', full, re.S).group(),
+                         re.search(r'<svg class="balance-chart".*?</svg>', filtered, re.S).group())
+        self.assertIn('name="from"', filtered)
+        self.assertIn('name="to"', filtered)
+        self.assertNotIn('name="day"', filtered)
+
+    def test_recent_deals_are_limited_to_fifteen(self) -> None:
+        payload = self.payload()
+        for ticket in range(3, 23):
+            deal = dict(payload["deals"][0])
+            deal["ticket"] = ticket
+            payload["deals"].append(deal)
+        store_snapshot(self.connection, payload, "vps")
+        page = render_accounts(self.connection, {}, self.now)
+        recent = page.split('<h3>Last 15 closed deals</h3>', 1)[1].split('</section>', 1)[0]
+        self.assertEqual(recent.count('<tbody><tr>'), 1)
+        self.assertEqual(recent.count('<tr>'), 16)  # One header and 15 deals.
 
     def test_stopped_terminal_does_not_start_mt5(self) -> None:
         folder = Path(self.temp.name) / "DATA"

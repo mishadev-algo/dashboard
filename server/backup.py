@@ -8,6 +8,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from shared.sqlite import open_readonly
+
 
 def create_backup(source: Path, directory: Path, now: datetime | None = None) -> Path:
     if not source.is_file():
@@ -22,7 +24,7 @@ def create_backup(source: Path, directory: Path, now: datetime | None = None) ->
     source_connection = None
     target_connection = None
     try:
-        source_connection = sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+        source_connection = open_readonly(source)
         target_connection = sqlite3.connect(temporary, timeout=30)
         source_connection.backup(target_connection, pages=1000, sleep=0.1)
         result = target_connection.execute("PRAGMA integrity_check").fetchone()

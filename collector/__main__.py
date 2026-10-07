@@ -6,6 +6,8 @@ import socket
 import time
 from pathlib import Path
 
+from shared.cadence import UPLOAD_INTERVAL_SECONDS
+
 from .core import Collector, open_database, resolve_host_id
 from .inventory import Inventory, load_inventory
 from .process import ProcessProbe
@@ -23,13 +25,17 @@ def main() -> None:
     parser.add_argument("--lookback-days", type=int, default=2, help="Days to scan on first startup (default: 2)")
     parser.add_argument("--follow", action="store_true", help="Keep polling instead of collecting once")
     parser.add_argument("--interval", type=float, default=2.0, help="Polling interval in seconds")
+    parser.add_argument("--upload-interval", "--heartbeat-interval", dest="upload_interval",
+                        type=float, default=UPLOAD_INTERVAL_SECONDS,
+                        help="Send queued logs and terminal state at this interval in seconds (default: 300)")
     parser.add_argument("--server-url", help="Central ingest origin; HTTPS required except for localhost")
     parser.add_argument("--batch-size", type=int, default=200, help="Events per upload (default: 200)")
     parser.add_argument("--pending-warning", type=int, default=100000, help="Warn when unsent lines reach this count")
     args = parser.parse_args()
 
-    if args.lookback_days < 0 or args.interval <= 0 or args.pending_warning < 1:
-        parser.error("lookback-days must be nonnegative; interval and pending-warning must be positive")
+    if args.lookback_days < 0 or args.interval <= 0 or not 0 < args.upload_interval <= UPLOAD_INTERVAL_SECONDS or args.pending_warning < 1:
+        parser.error("lookback-days must be nonnegative; interval and pending-warning must be positive; "
+                     "upload-interval must be within 0-300 seconds with the current health timeout")
 
     inventory_path = args.inventory or Path("inventory.json")
     try:
@@ -65,6 +71,7 @@ def main() -> None:
             parser.error(str(exc))
         process_probe = ProcessProbe()
     failed = False
+    last_upload_attempt = None
     try:
         while True:
             result = collector.run_once()
@@ -72,8 +79,13 @@ def main() -> None:
             upload_error = None
             if uploader:
                 try:
-                    process_states = process_probe.check(result.paths) if process_probe else {}
-                    uploaded = uploader.upload(heartbeat(connection, host_id, result, process_states))
+                    now = time.monotonic()
+                    upload_due = last_upload_attempt is None or now - last_upload_attempt >= args.upload_interval
+                    if upload_due:
+                        process_states = process_probe.check(result.paths) if process_probe else {}
+                        state = heartbeat(connection, host_id, result, process_states)
+                        last_upload_attempt = now
+                        uploaded = uploader.upload(state)
                 except RemoteUploadError as exc:
                     upload_error = str(exc)
                     failed = True
