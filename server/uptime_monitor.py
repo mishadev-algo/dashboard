@@ -63,6 +63,7 @@ def step(url: str, path: Path, send, *, healthy: bool | None = None, failures_re
     state = load_state(path)
     healthy = check(url) if healthy is None else healthy
     checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    state.update(url=url, checked_at_utc=checked_at)
     if healthy:
         state["failures"] = 0
         if state["healthy"] is False:

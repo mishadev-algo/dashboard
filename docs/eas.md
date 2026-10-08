@@ -6,6 +6,8 @@ The MetaTrader5 Python integration exposes account, orders, positions, deals, sy
 
 ## Install on each terminal
 
+For a new Windows host, the [unified installer](connect-new-windows-agent.md) with profile `Full` copies and compiles this service in every expected terminal. Its `Check` mode verifies report freshness and account identity. Activate one instance in each MT5 as described below; leave that service's Algo Trading and Signals permissions disabled.
+
 1. In that terminal, choose **File → Open Data Folder**. Copy `mql5/DashboardEaProbe.mq5` into its `MQL5\Services` directory.
 2. Open the source in MetaEditor and compile it. Confirm the compile has no errors.
 3. In MT5 Navigator, expand **Services**, create one instance of **DashboardEaProbe** with **Add Service**, and start it. Repeat for every monitored MT5 terminal, including portable installations. MT5 restarts services that were running when the terminal shut down.

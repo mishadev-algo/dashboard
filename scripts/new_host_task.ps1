@@ -7,6 +7,7 @@ param(
     [string]$PythonExe,
     [string]$CollectorDb = 'collector-central.db',
     [string]$Inventory = 'inventory.json',
+    [string]$Accounts,
     [string[]]$Roots = @(),
     [string[]]$Terminals = @(),
     [Security.SecureString]$CollectorToken,
@@ -45,6 +46,9 @@ if ($Mode -eq 'Save') {
     if ((Test-Path -LiteralPath $configPath) -and -not $Force) {
         throw 'Remote settings already exist; pass -Force only for an intentional replacement.'
     }
+    if ($Accounts -and -not (Test-Path -LiteralPath (Join-Path $ProjectDir $Accounts) -PathType Leaf)) {
+        throw 'Accounts file is missing.'
+    }
     if (-not $CollectorToken) {
         $CollectorToken = Read-Host -Prompt 'Paste this host collector token' -AsSecureString
     }
@@ -65,11 +69,12 @@ if ($Mode -eq 'Save') {
         server_url = $uri.GetLeftPart([UriPartial]::Authority)
         collector_token = ConvertFrom-SecureString -SecureString $CollectorToken
     }
+    if ($Accounts) { $config.accounts = $Accounts }
     $config | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configPath -Encoding UTF8
     $null = & icacls $configPath /inheritance:r /grant:r ('*' + $currentSid + ':(F)') '*S-1-5-18:(F)' '*S-1-5-32-544:(F)'
     if ($LASTEXITCODE -ne 0) { throw 'Could not restrict remote settings permissions.' }
     Write-Host "Saved encrypted collector settings for $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
-    exit 0
+    return
 }
 
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
@@ -96,7 +101,7 @@ if ($Mode -eq 'Install') {
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
         -Principal $principal -Settings $settings -Description 'MT5 log collector to central VPS' -Force | Out-Null
     Write-Host "Installed $TaskName for $user. Start the task after the central token is registered."
-    exit 0
+    return
 }
 
 $secure = ConvertTo-SecureString -String ([string]$config.collector_token)
@@ -116,6 +121,7 @@ $arguments = @(
 )
 foreach ($path in $config.roots) { $arguments += @('--root', [string]$path) }
 foreach ($path in $config.terminals) { $arguments += @('--terminal', [string]$path) }
+if ($config.accounts) { $arguments += @('--accounts', [string]$config.accounts) }
 
 Set-Location -LiteralPath $ProjectDir
 [Environment]::SetEnvironmentVariable('PYTHONIOENCODING', 'utf-8', 'Process')

@@ -20,6 +20,7 @@ from shared.cadence import UPLOAD_INTERVAL_SECONDS
 from shared.network import server_origin
 from shared.paths import windows_path
 from shared.timezones import day_zone
+from shared.runtime_state import write_state
 
 from .core import terminal_id
 from .process import ProcessSnapshot, classify_terminal, install_path, list_terminal_processes
@@ -169,6 +170,7 @@ def main() -> None:
     parser.add_argument("--server-url", required=True)
     parser.add_argument("--interval", type=float, default=UPLOAD_INTERVAL_SECONDS)
     parser.add_argument("--follow", action="store_true")
+    parser.add_argument("--status-file", type=Path, help="Local diagnostic receipt (no positions or deals)")
     args = parser.parse_args()
     if args.interval <= 0:
         parser.error("interval must be positive")
@@ -181,15 +183,25 @@ def main() -> None:
     except (KeyError, ValueError) as exc:
         parser.error(str(exc))
     try:
+        runtime = {"host_id": args.host_id, "server_url": args.server_url, "terminals": {}}
         while True:
             processes = list_terminal_processes()
             for target in targets:
                 payload = probe_target(target, args.host_id, processes)
+                receipt = {"observed_at_utc": payload["observed_at_utc"],
+                           "expected_login": target.login, "expected_server": target.server,
+                           "day_timezone": target.day_timezone, "history_days": target.history_days,
+                           "status": payload["status"]}
                 try:
                     upload_snapshot(args.server_url, args.host_id, token, payload)
+                    receipt["last_upload_utc"] = datetime.now(timezone.utc).isoformat()
                     print(f"account_probe={target.data_path} state={payload['status']['state']} uploaded=1", flush=True)
                 except (RuntimeError, ValueError) as exc:
+                    receipt["upload_error"] = str(exc)
                     print(f"account_probe={target.data_path} upload_error={exc}", flush=True)
+                runtime["terminals"][windows_path(str(target.data_path))] = receipt
+                if args.status_file:
+                    write_state(args.status_file, runtime)
             if not args.follow:
                 break
             time.sleep(args.interval)

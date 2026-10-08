@@ -4,9 +4,11 @@ import argparse
 import os
 import socket
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from shared.cadence import UPLOAD_INTERVAL_SECONDS
+from shared.runtime_state import write_state
 
 from .core import Collector, open_database, resolve_host_id
 from .inventory import Inventory, load_inventory
@@ -31,6 +33,7 @@ def main() -> None:
     parser.add_argument("--server-url", help="Central ingest origin; HTTPS required except for localhost")
     parser.add_argument("--batch-size", type=int, default=200, help="Events per upload (default: 200)")
     parser.add_argument("--pending-warning", type=int, default=100000, help="Warn when unsent lines reach this count")
+    parser.add_argument("--status-file", type=Path, help="Local diagnostic receipt (no secrets)")
     args = parser.parse_args()
 
     if args.lookback_days < 0 or args.interval <= 0 or not 0 < args.upload_interval <= UPLOAD_INTERVAL_SECONDS or args.pending_warning < 1:
@@ -72,9 +75,11 @@ def main() -> None:
         process_probe = ProcessProbe()
     failed = False
     last_upload_attempt = None
+    runtime = {"host_id": host_id, "server_url": args.server_url}
     try:
         while True:
             result = collector.run_once()
+            runtime["last_scan_utc"] = datetime.now(timezone.utc).isoformat()
             uploaded = 0
             upload_error = None
             if uploader:
@@ -86,10 +91,18 @@ def main() -> None:
                         state = heartbeat(connection, host_id, result, process_states)
                         last_upload_attempt = now
                         uploaded = uploader.upload(state)
+                        runtime["last_upload_utc"] = datetime.now(timezone.utc).isoformat()
+                        runtime.pop("upload_error", None)
                 except RemoteUploadError as exc:
                     upload_error = str(exc)
                     failed = True
+                    runtime["upload_error"] = upload_error
             pending = pending_count(connection)
+            if args.status_file:
+                runtime.update(pending=pending,
+                               expected=list(result.expected), missing=list(result.missing),
+                               unknown=list(result.unknown))
+                write_state(args.status_file, runtime)
             warning = " QUEUE_WARNING" if pending >= args.pending_warning else ""
             print(
                 f"discovered={result.discovered} events={result.events} uploaded={uploaded} "

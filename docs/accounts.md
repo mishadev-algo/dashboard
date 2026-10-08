@@ -1,5 +1,7 @@
 # MT5 connection and account worker
 
+For a new Windows VPS, use the [unified host installer](connect-new-windows-agent.md) with profile `Accounts` or `Full`. It discovers running terminals and current accounts into reviewed proposals, saves the worker configuration, and checks acknowledged delivery. Select the PnL day timezone explicitly; fixed UTC+3 is `Etc/GMT-3`.
+
 This optional Windows worker reads broker connection, terminal AutoTrading state, open positions, and historical deals from specific running MT5 installations. It never calls order functions or passes account credentials to MT5. It checks the Windows process list before attaching, then verifies both MT5's reported data folder and the configured account login/server before accepting positions or deals. A stopped process is reported without calling `MetaTrader5.initialize()`. Because MT5 can close between the process check and the attach call, install and test this worker in a maintenance window.
 
 The worker uses MetaQuotes' [`initialize`](https://www.mql5.com/en/docs/python_metatrader5/mt5initialize_py), [`terminal_info`](https://www.mql5.com/en/docs/python_metatrader5/mt5terminalinfo_py), [`account_info`](https://www.mql5.com/en/docs/python_metatrader5/mt5accountinfo_py), [`positions_get`](https://www.mql5.com/en/docs/python_metatrader5/mt5positionsget_py), and [`history_deals_get`](https://www.mql5.com/en/docs/python_metatrader5/mt5historydealsget_py) APIs. `initialize` can launch MT5, which is why the worker checks the target process twice before calling it.

@@ -40,6 +40,7 @@ def service_plan(args: argparse.Namespace, environ: Mapping[str, str]) -> tuple[
     python = sys.executable
     collector = [python, "-u", "-m", "collector", "--db", str(args.collector_db),
                  "--host-id", host_id, "--inventory", str(args.inventory),
+                 "--status-file", str(args.collector_db.parent / ".dashboard-collector-state.json"),
                  "--server-url", origin, "--follow"]
     for root in args.root:
         collector.extend(("--root", str(root)))
@@ -50,6 +51,7 @@ def service_plan(args: argparse.Namespace, environ: Mapping[str, str]) -> tuple[
         services.append(Service("accounts", (
             python, "-u", "-m", "collector.accounts", "--config", str(args.accounts),
             "--host-id", host_id, "--server-url", origin, "--follow",
+            "--status-file", str(args.accounts.parent / ".dashboard-accounts-state.json"),
         )))
     return host_id, tuple(services)
 

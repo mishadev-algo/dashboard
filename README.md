@@ -6,7 +6,7 @@ The dashboard also has a separate [Backtest Lab](docs/backtest-lab.md) at `/back
 
 See [one-window VPS startup](docs/VPS_START.md), [collector usage](docs/collector.md), [central ingest setup](docs/ingest.md), [Telegram alerts](docs/alerts.md), [account worker setup](docs/accounts.md), [Expert Advisors page](docs/eas.md), and [alpha release/deployment](docs/release.md). The release runbook includes a separate backup restore check and a Windows logon task helper.
 
-For a separate Linux central VPS, use the [Linux launch runbook](docs/linux-vps.md). It includes a source-only package, PostgreSQL import, systemd unit, and Caddy configuration. To connect another Windows MT5 server to the running central VPS, give its agent the [new-host instructions](docs/connect-new-windows-agent.md).
+For a separate Linux central VPS, use the [Linux launch runbook](docs/linux-vps.md). It includes a source-only package, PostgreSQL import, systemd unit, and Caddy configuration. To connect another Windows MT5 server, use the [new-host installer and instructions](docs/connect-new-windows-agent.md): `scripts/setup_host.ps1` prepares proposals, installs Logs/Accounts/Full profiles, and checks delivery. Full includes EA-service compilation (first activation in MT5) and a separate availability monitor.
 
 Run the fixture checks:
 
